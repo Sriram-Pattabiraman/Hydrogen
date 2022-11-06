@@ -11,7 +11,7 @@ from tqdm import tqdm
 import pyqtgraph as pg
 import PyQt5
 DashLine = PyQt5.QtCore.Qt.DashLine #doing this as a from import doesn't work for unknown reasons.
-#start the qt5 event loo
+#start the qt5 event loop
 %gui qt5
 
 import math
@@ -156,14 +156,14 @@ def Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, d
 
 def find_ith_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, eigen_index, tolerance): #i is the eigen_index
     tailored_prufer_mismatch = lambda lambda_: Prufer_Mismatch(lambda_) - eigen_index
-    eigen_val = Secant_Method(tailored_prufer_mismatch, 1, 2, tolerance)
+    eigen_val = Secant_Method(tailored_prufer_mismatch, .1, .2, tolerance)
     return eigen_val
 
 def find_first_n_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, up_to_n_eigens, tolerance, custom_eigen_list=False): #custom_eigen_list overrides up_to_n_eigens
     if not custom_eigen_list:
-        return map(lambda eigen_index: find_ith_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, eigen_index, tolerance), range(up_to_n_eigens))
+        return map(lambda eigen_index: find_ith_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, eigen_index, tolerance), tqdm(range(up_to_n_eigens)))
     else:
-        return map(lambda eigen_index: find_ith_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, eigen_index, tolerance), custom_eigen_list)
+        return map(lambda eigen_index: find_ith_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, eigen_index, tolerance), tqdm(custom_eigen_list))
 
 def find_first_n_eigen_vals_given_original_boundary_conditions_prufer(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx, up_to_n_eigens, tolerance, custom_eigen_list=False):
     Prufer_Mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
@@ -172,7 +172,7 @@ def find_first_n_eigen_vals_given_original_boundary_conditions_prufer(p, q, w, x
     return eigens
 
 def find_eigen_funcs_given_eigen_vals(lambda_list, p, q, w, x_init, y_init, dy__dx_init, x_end, dx):
-    return map(lambda lambda_: Solve_LSLP_IVP(lambda_, p, q, w, x_init, y_init, dy__dx_init, x_end, dx, store_solution=True)[3], lambda_list)
+    return map(lambda lambda_: Solve_LSLP_IVP(lambda_, p, q, w, x_init, y_init, dy__dx_init, x_end, dx, store_solution=True)[3], tqdm(lambda_list))
 
 
 def boundary_conditions_to_shooters(conditions, mode="periodic"): #takes in some form of boundary conditions and outputs the shooter conditions. the solutions to the shooters for a given eigenvalue are a basis for the eigenspace of that eigenvalue. i'm pretty sure that's right. hopefully they do indeed have the same eigenvalue...
@@ -232,10 +232,10 @@ def plot_mismatch(possible_eigens, mismatch):
     vb.setYRange(*y_range)
     vb.addItem(origin_x_axis)
 
-def Make_Displacement_Newton(func, dx):
+def Make_Displacement_Newton(func, dlambda=.1):
     #for a prufer mismatch:
-    #add the sought index to get the displacement_newton_function [which tells you where newton's method will move to get the next iteration] for the tailored prufer mismatch for that index. what this means is that if the displacement_newton_function equals -i at a point, then that point is a fixed point of newton's method on the tailored prufer mismatch for the ith eigenval.
-    return lambda x: -func(x)/NumD(func, dx, cmp_step=False)(x)
+    #add the sought index/f' to get the displacement_newton_function [which tells you where newton's method will move to get the next iteration] for the tailored prufer mismatch for that index [since -(f-i)/(f-i)' = -(f-i)/f' = -f/f' + i/f'. what this means is that if the displacement_newton_function equals i/f' at a point, then that point is a fixed point of newton's method on the tailored prufer mismatch for the ith eigenval.
+    return lambda x: -func(x)/NumD(func, dlambda, cmp_step=False)(x)
 
 def plot_many_funcs(list_of_list_of_x_vals, funcs, hue_converge=True, val_converge=True):
     pw = pg.plot()
@@ -322,19 +322,36 @@ dx = .001
 tolerance = .001
 up_to_n_eigens = 15
 
-prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-displacement_newton = Make_Displacement_Newton(prufer_mismatch, dx)
-#generic_plot(np.arange(-100,100,.1), prufer_mismatch)
+
+#prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
+#displacement_newton = Make_Displacement_Newton(prufer_mismatch, dlambda=dx)
+#generic_plot(np.arange(-.5,10,.1), prufer_mismatch)
 #generic_plot(np.arange(-.5,10,.1), displacement_newton)
 
-displacement_newton_param_by_dx = lambda dx: Make_Displacement_Newton(Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx), dx)
 
-dx_list = np.arange(.001, .0001, -.0001)
-list_of_x_vals = np.tile(np.arange(-5,10,.1), [len(dx_list),1])
-plot_many_funcs(list_of_x_vals, np.vectorize(displacement_newton_param_by_dx)(dx_list))
+#prufer_mismatches_param_by_dx = lambda dx: Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
+#displacement_newton_param_by_dx = lambda dx: Make_Displacement_Newton(prufer_mismatches_param_by_dx(dx))
+#index_addition_scaling_funcs_param_by_dx = lambda dx: lambda lambda_: 1/NumD(prufer_mismatches_param_by_dx(dx), dx, cmp_step=False)(lambda_) #on the plot, i_p*these + (the newton function for i=0) = (the newton function for i=i_p)
 
+#dx_list = np.arange(.01, .001, -.001)
+#displacement_funcs = np.vectorize(displacement_newton_param_by_dx)(dx_list)
+#index_addition_scaling_funcs = np.vectorize(index_addition_scaling_funcs_param_by_dx)(dx_list)
+#interleaved_list = np.reshape(np.column_stack((displacement_funcs, index_addition_scaling_funcs)), -1) #shape dimension of -1 lets numpy figure out the length of the flattened interleaving from knowing it should by flat
+
+#list_of_x_vals = np.tile(np.arange(.1,16,.1), [len(dx_list)*2,1])
+#plot_many_funcs(list_of_x_vals, interleaved_list)
+
+
+#displacement_newton_param_by_i = lambda i: Make_Displacement_Newton(lambda x: Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)(x) - i)
+#i_list = np.array(range(0,10))
+#list_of_x_vals = np.tile(np.arange(.1,16,.1), [len(i_list),1])
+#plot_many_funcs(list_of_x_vals, np.vectorize(displacement_newton_param_by_i)(i_list))
+
+prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
 #eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)))
 #eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, dx)))
 #plot_eigen_funcs(eigen_funcs, eigen_vals)
-
 #magnetic_quantum_numbers = np.sqrt(eigen_vals)
+
+stress_test_index = 100
+find_ith_eigen_val_given_Prufer_Mismatch(prufer_mismatch, stress_test_index, tolerance)
