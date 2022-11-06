@@ -38,6 +38,7 @@ def NumD(f, dx, cmp_step=True): #returns NUMericalDerivatives using the complex 
 
 def Secant_Method(f, x_0, x_1, tolerance, f_index_to_rootfind=False): #secant method is finite difference version of newton's method
     #WARNING: The oscillatory nature of the mismatch function means this may fail catastrophically.
+    #!!!implement a test that then yells at the user if this is in the process of failing catastrophically
     if f_index_to_rootfind is False: #is to prevent 0==False
         x_n0, x_n1 = x_0, x_1
         thisF = f(x_n1)
@@ -87,7 +88,7 @@ def Solve_LSLP_IVP(lambda_, p, q, w, x_init, y_init, dy__dx_init, x_end, dx, sto
     else:
         return y, dy__dx, zero_count
 
-'''
+''' Old Shooting Algorithm (without prufer)
 def LR_Shots_Mismatch_lambda(lambda_, p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx): #calculates the mismatch function at lambda by solving the LSLP_IVP at one boundary toward the other, stopping halfway. it takes the y's and the dy/dx's at the halfway point for each shot and then calculates left_y'*right_y - right_y'*left_y
     number_of_samples = (x_b - x_a)//dx
 
@@ -204,6 +205,20 @@ def particular_spanning_solutions_to_general(y_1, y_2, dx): #!!!use this
 
 
 
+def generic_plot(x_vals, func): #!!!note: should consistently make this func, vals. actually come up with a consistent argument order in general. also you should make a consistent naming and capitalization scheme. right now there's like 4 different ones.
+    y_vals = np.vectorize(func)(x_vals)
+
+    min_y, max_y = np.min(y_vals), np.max(y_vals)
+    y_abs_limit = np.min([abs(min_y), abs(max_y)])
+    y_range = [-y_abs_limit, y_abs_limit]
+
+    pw = pg.plot(x_vals, y_vals, pen='r') #this is the plot widget
+    origin_x_axis = pg.InfiniteLine(0, 0, pen={'color':'b', 'style':DashLine})
+    pi = pw.getPlotItem()
+    vb = pi.getViewBox()
+    vb.setYRange(*y_range)
+    vb.addItem(origin_x_axis)
+
 
 def plot_mismatch(possible_eigens, mismatch):
     mismatch_vals, eigen_indices = np.vectorize(mismatch)(possible_eigens)
@@ -257,24 +272,32 @@ plot_mismatch(np.arange(-3,100,.1), mismatch)
 '''
 
 
-'''
+
 p,q,w = lambda x:1, lambda x: 0, lambda x: 1
 x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = boundary_conditions_to_shooters([0, 2*math.pi])[1]
 #d^2y/dx^2 = -\lambda y with periodic boundary conditions y(0)=y(2*\pi)=0. y'(0)=y'(2*\pi)=1 This is the equation for the azimuthal angle. The eigen_vals are the eigenvalues of -d^2/dx^2, and therefore the magnetic quantum number m=sqrt(\lambda)
+
+
+
 '''
-
-
-
 m=3
 p,q,w = lambda x: math.sin(x), lambda x: m/math.sin(x), lambda x: math.sin(x) #!!!figure out way to deal with blowup at 0, math.pi without resorting to analytical method
 x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = 0, 0, 1, math.pi, 0, 1
+'''
+
 #!!!frobenious method
 
 dx = .001
 tolerance = .001
 up_to_n_eigens = 15
 prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-eigen_vals = list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)) #!!!fix mysterious missing of half the eigenvals
+eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)))
 eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, dx)))
 
-plot_eigen_funcs(eigen_funcs, eigen_vals)
+#plot_eigen_funcs(eigen_funcs, eigen_vals)
+#!!!make a function to plot prufer mismatch and displacement newton function to allow for analysis for any of these problems
+#generic_plot(np.arange(-100,100,.1), prufer_mismatch)
+displacement_newton_function = lambda x: -prufer_mismatch(x)/NumD(prufer_mismatch, dx, cmp_step=False)(x) #add the sought index to get the displacement_newton_function [which tells you where newton's method will move to get the next iteration] for the tailored prufer mismatch for that index. what this means is that if the displacement_newton_function equals -i at a point, then that point is a fixed point of newton's method on the tailored prufer mismatch for the ith eigenval.
+generic_plot(np.arange(-25,25,.1),displacement_newton_function)
+
+magnetic_quantum_numbers = np.sqrt(eigen_vals)
