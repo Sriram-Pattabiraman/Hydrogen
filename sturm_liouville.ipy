@@ -30,7 +30,7 @@ Sometimes, and for the programmed prufer implementation, p, q >0 is required.
 
 def NumD(f, dx, cmp_step=True): #returns NUMericalDerivatives using the complex step method, with finite difference method as a fallback for higher orders.
     if cmp_step:
-        #since this is quantum mechanics, f is complex valued. assuming continuity is equivalent to assuming it's holomorphic is equivalent to analytic. expanding f(x + ih) as a taylor series and then taking the imaginary part, f'(x) = Im(f(x+ih))/h + O(h^2). this also doesn't have as bad issues of floating point error when h is small, as unlike finite differences, this is well conditioned.
+        #since this is quantum mechanics, things tend to be complex valued. assuming continuity is equivalent to assuming it's holomorphic is equivalent to analytic. expanding f(x + ih) as a taylor series and then taking the imaginary part, f'(x) = Im(f(x+ih))/h + O(h^2). this also doesn't have as bad issues of floating point error when h is small, as unlike finite differences, this is well conditioned.
         return lambda x: f(x+dx*1j).imag/dx #only works for first order for reasons.
     else:
         return lambda x: (f(x+dx)-f(x-dx))/(2*dx)
@@ -353,5 +353,7 @@ prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, 
 #plot_eigen_funcs(eigen_funcs, eigen_vals)
 #magnetic_quantum_numbers = np.sqrt(eigen_vals)
 
-stress_test_index = 100
-find_ith_eigen_val_given_Prufer_Mismatch(prufer_mismatch, stress_test_index, tolerance)
+while True:
+    stress_test_index = int(input())
+    stress_m = (find_ith_eigen_val_given_Prufer_Mismatch(prufer_mismatch, stress_test_index, tolerance))**.5
+    print(stress_m)
