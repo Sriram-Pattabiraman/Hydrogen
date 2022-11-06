@@ -6,8 +6,7 @@ Created on Thu Oct  6 10:40:35 2022
 """
 
 
-from icecream import ic
-
+from tqdm import tqdm
 
 import pyqtgraph as pg
 import PyQt5
@@ -219,7 +218,6 @@ def generic_plot(x_vals, func): #!!!note: should consistently make this func, va
     vb.setYRange(*y_range)
     vb.addItem(origin_x_axis)
 
-
 def plot_mismatch(possible_eigens, mismatch):
     mismatch_vals, eigen_indices = np.vectorize(mismatch)(possible_eigens)
 
@@ -232,6 +230,39 @@ def plot_mismatch(possible_eigens, mismatch):
     pi = pw.getPlotItem()
     vb = pi.getViewBox()
     vb.setYRange(*y_range)
+    vb.addItem(origin_x_axis)
+
+def Make_Displacement_Newton(func, dx):
+    #for a prufer mismatch:
+    #add the sought index to get the displacement_newton_function [which tells you where newton's method will move to get the next iteration] for the tailored prufer mismatch for that index. what this means is that if the displacement_newton_function equals -i at a point, then that point is a fixed point of newton's method on the tailored prufer mismatch for the ith eigenval.
+    return lambda x: -func(x)/NumD(func, dx, cmp_step=False)(x)
+
+def plot_many_funcs(list_of_list_of_x_vals, funcs, hue_converge=True, val_converge=True):
+    pw = pg.plot()
+    pi = pw.getPlotItem()
+    index = 0
+    total_indices = len(list_of_list_of_x_vals)
+    for x_vals in tqdm(list_of_list_of_x_vals):
+        x_vals = np.array(x_vals)
+        phi = (1 + 5**0.5) / 2
+        if hue_converge:
+            hue = (index+1)/(total_indices*2) #here index+1 is not actually necessary, could just do index, but keeping with the pattern [that is required] seen elsewhere in this function. #multiply the denominator by 2 to get hue from 0 to .5 to get from red to green instead of red to cyan.
+        else:
+            hue = ((index+1)*phi)%1 #if you multiply by phi mod 1 you get equidistribution by that one theorem (some source said phi was special for this, but i had thought it was true of all irrationals...). do index+1 times phi so that the start color isn't black so it's visible on the default (and morally superior) black background of pyqtgraph graphs
+
+        if val_converge:
+            val = (index+1)/(total_indices*2) + .5 #ensures val is at least .5, which makes the early entries still visible while being darker.
+        else:
+            val = 1
+
+        uniqueish_pen = pg.mkPen(hsv=[hue, 1.0, val])
+        pi.plot(list_of_list_of_x_vals[index], np.vectorize(funcs[index])(x_vals), pen=uniqueish_pen)
+
+        index +=1
+
+    origin_x_axis = pg.InfiniteLine(0, 0, pen={'color':'b', 'style':DashLine})
+
+    vb = pi.getViewBox()
     vb.addItem(origin_x_axis)
 
 
@@ -290,14 +321,20 @@ x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = 0, 0, 1, math.pi, 0, 1
 dx = .001
 tolerance = .001
 up_to_n_eigens = 15
+
 prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
+displacement_newton = Make_Displacement_Newton(prufer_mismatch, dx)
+#generic_plot(np.arange(-100,100,.1), prufer_mismatch)
+#generic_plot(np.arange(-.5,10,.1), displacement_newton)
+
+displacement_newton_param_by_dx = lambda dx: Make_Displacement_Newton(Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx), dx)
+
+dx_list = np.arange(.001, .0001, -.0001)
+list_of_x_vals = np.tile(np.arange(-5,10,.1), [len(dx_list),1])
+plot_many_funcs(list_of_x_vals, np.vectorize(displacement_newton_param_by_dx)(dx_list))
+
 #eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)))
 #eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, dx)))
-
 #plot_eigen_funcs(eigen_funcs, eigen_vals)
-#!!!make a function to plot prufer mismatch and displacement newton function to allow for analysis for any of these problems
-#generic_plot(np.arange(-100,100,.1), prufer_mismatch)
-displacement_newton_function = lambda x: -prufer_mismatch(x)/NumD(prufer_mismatch, dx, cmp_step=False)(x) #add the sought index to get the displacement_newton_function [which tells you where newton's method will move to get the next iteration] for the tailored prufer mismatch for that index. what this means is that if the displacement_newton_function equals -i at a point, then that point is a fixed point of newton's method on the tailored prufer mismatch for the ith eigenval.
-generic_plot(np.arange(-.5,10,.1),displacement_newton_function)
 
 #magnetic_quantum_numbers = np.sqrt(eigen_vals)
