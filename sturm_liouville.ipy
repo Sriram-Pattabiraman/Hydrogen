@@ -291,13 +291,13 @@ dx = .001
 tolerance = .001
 up_to_n_eigens = 15
 prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)))
-eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, dx)))
+#eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)))
+#eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, dx)))
 
 #plot_eigen_funcs(eigen_funcs, eigen_vals)
 #!!!make a function to plot prufer mismatch and displacement newton function to allow for analysis for any of these problems
 #generic_plot(np.arange(-100,100,.1), prufer_mismatch)
 displacement_newton_function = lambda x: -prufer_mismatch(x)/NumD(prufer_mismatch, dx, cmp_step=False)(x) #add the sought index to get the displacement_newton_function [which tells you where newton's method will move to get the next iteration] for the tailored prufer mismatch for that index. what this means is that if the displacement_newton_function equals -i at a point, then that point is a fixed point of newton's method on the tailored prufer mismatch for the ith eigenval.
-generic_plot(np.arange(-25,25,.1),displacement_newton_function)
+generic_plot(np.arange(-.5,10,.1),displacement_newton_function)
 
-magnetic_quantum_numbers = np.sqrt(eigen_vals)
+#magnetic_quantum_numbers = np.sqrt(eigen_vals)
