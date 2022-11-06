@@ -1,0 +1,280 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Oct  6 10:40:35 2022
+
+@author: Sri
+"""
+
+
+from icecream import ic
+
+
+import pyqtgraph as pg
+import PyQt5
+DashLine = PyQt5.QtCore.Qt.DashLine #doing this as a from import doesn't work for unknown reasons.
+#start the qt5 event loo
+%gui qt5
+
+import math
+import numpy as np
+
+
+'''
+We use the convention that the Sturm-Liouville problem is a real 2nd order ODE of the form d/dx [p(x)dy(x)/dx] - q(x)y(x) = -lambda w(x) y(x), where finding the possible eigenvalue lambda is part of the problem and thus unspecified
+We use the convention that the regular problem has boundary conditions of a_0 y(a) + b_0 p(a) y'(a) = 0 and a_1 y(b) + b_1 p(b) y'(b) = 0. Importantly, a and b cannot both be 0 in either of those conditions. This implies that y=0 and y'=0 is not a regular boundary condition [otherwise we'll get constant 0 as the solution].
+When going from those boundary conditions to initial y and y' at a and b for the purposes of the shooting method, there's [sometimes? need to do the math on this] freedom in selecting one of the a_i or b_i. The fact that setting them all to 0 would lead to a trivial solution means we need to be careful about what we arbitrarily end up picking.
+
+Sometimes the problem with the DE in the above form is "regular" and the conditions are either "separated" as above or "periodic".
+Sometimes, and for the programmed prufer implementation, p, q >0 is required.
+'''
+
+
+def NumD(f, dx, cmp_step=True): #returns NUMericalDerivatives using the complex step method, with finite difference method as a fallback for higher orders.
+    if cmp_step:
+        #since this is quantum mechanics, f is complex valued. assuming continuity is equivalent to assuming it's holomorphic is equivalent to analytic. expanding f(x + ih) as a taylor series and then taking the imaginary part, f'(x) = Im(f(x+ih))/h + O(h^2). this also doesn't have as bad issues of floating point error when h is small, as unlike finite differences, this is well conditioned.
+        return lambda x: f(x+dx*1j).imag/dx #only works for first order for reasons.
+    else:
+        return lambda x: (f(x+dx)-f(x-dx))/(2*dx)
+
+def Secant_Method(f, x_0, x_1, tolerance, f_index_to_rootfind=False): #secant method is finite difference version of newton's method
+    #WARNING: The oscillatory nature of the mismatch function means this may fail catastrophically.
+    if f_index_to_rootfind is False: #is to prevent 0==False
+        x_n0, x_n1 = x_0, x_1
+        thisF = f(x_n1)
+        while abs(thisF) >= tolerance:
+            dx = x_n1-x_n0
+            df = f(x_n1)-f(x_n0)
+            x_n2 = x_n1 - f(x_n1)*(dx/df) #f * dx/df = f / (df/dx)
+
+            x_n0, x_n1 = x_n1, x_n2
+            thisF = f(x_n1)
+
+        return x_n1
+
+    else:
+        x_n0, x_n1 = x_0, x_1
+        thisF = f(x_n1)
+        while abs(thisF[f_index_to_rootfind]) >= tolerance:
+            dx = x_n1-x_n0
+            df = f(x_n1)[f_index_to_rootfind]-f(x_n0)[f_index_to_rootfind]
+            x_n2 = x_n1 - f(x_n1)[f_index_to_rootfind]*(dx/df) #f * dx/df = f / (df/dx)
+
+            x_n0, x_n1 = x_n1, x_n2
+            thisF = f(x_n1)
+
+        return x_n1, thisF[:f_index_to_rootfind]+thisF[f_index_to_rootfind:]
+
+def LSLP_FD2(lambda_, p_x, q_x, w_x, dp__dx_x, y_x, dy__dx_x): #LSLP is Lambda Sturm-Liouville Problem aka lambda is given. #returns the finite 2nd order difference as a function of lambda_, y_x, and dy__dx_x; where p_x,q_x,y_x are p(x),q(x),y(x) evaluated at x (think of solving an IVP using Euler's method)
+    return (-lambda_*w_x*y_x + q_x*y_x - dp__dx_x * dy__dx_x)/p_x #hopefully i did my algebra right. if i did, then this is d^2y/dx^2
+
+def Solve_LSLP_IVP(lambda_, p, q, w, x_init, y_init, dy__dx_init, x_end, dx, store_solution=False): #for goodest results, dx should divide x_end-x_init #quadratic approximation, aka updates y at each time step as y + dy/dx dx + 1/2 d^2y/dx^2 dx^2
+    x, y, dy__dx = x_init, y_init, dy__dx_init
+    dp__dx = NumD(p, dx, cmp_step=True)
+    zero_count = 0
+    if store_solution:
+        point_list = []
+    while x<x_end:
+        if store_solution:
+            point_list.append((x,y))
+        d2y__dx2 = LSLP_FD2(lambda_, p(x), q(x), w(x), dp__dx(x), y, dy__dx)
+        x_new, y_new, dy__dx_new = x+dx, y+dy__dx*dx+.5*d2y__dx2*(dx**2), dy__dx + d2y__dx2*dx
+        if (y_new < 0 and y > 0) or (y < 0 and y_new > 0):
+            zero_count += 1 #by IVT
+        x, y, dy__dx = x_new, y_new, dy__dx_new
+
+    if store_solution:
+        return y, dy__dx, zero_count, point_list
+    else:
+        return y, dy__dx, zero_count
+
+'''
+def LR_Shots_Mismatch_lambda(lambda_, p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx): #calculates the mismatch function at lambda by solving the LSLP_IVP at one boundary toward the other, stopping halfway. it takes the y's and the dy/dx's at the halfway point for each shot and then calculates left_y'*right_y - right_y'*left_y
+    number_of_samples = (x_b - x_a)//dx
+
+    halfway_indice = number_of_samples//2 #for all i know flooring still makes this just (x_b - x_a)/2 or (x_b - x_a)//2, but i'm pretty sure it isn't
+    x_halfway = x_a + halfway_indice*dx
+
+    left_shot = Solve_LSLP_IVP(lambda_, p, q, w, x_a, y_a, dy__dx_a, x_halfway, dx)
+    right_shot = Solve_LSLP_IVP(lambda_, p, q, w, x_b, y_b, dy__dx_b, x_halfway, -dx)
+
+    eigen_index = left_shot[2] + right_shot[2] #sum of the left and right roots is total number of roots is the eigenvalue index due to a theorem of SLP's.
+
+    return p(x_halfway)*left_shot[1]*right_shot[0] - p(x_halfway)*right_shot[1]*left_shot[0], eigen_index
+
+def Make_Mismatch(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx):
+    #!!!find a way to take advantage of the fact that it's mostly the same IVP for each lambda without incurring huge memory costs
+    #ideas to refactor: do the x_0 sample of all the eigens at once, then do the x_0+1dx, and so on. this way the p,q,w,dp__dx_x are still only computed once, but now don't need to be stored beyond that step.
+    def Mismatch(lambda_, dx=dx): #returns the mismatch and the eigenindex
+        return LR_Shots_Mismatch_lambda(lambda_, p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
+
+    return Mismatch
+'''
+
+def Prufer_FD1(lambda_, p_x, q_x, w_x, theta_x): #d\theta/dx = 1/p cos^2(\theta) + (\lambda * w - q) * sin^2(\theta)
+    return (1/p_x)*(math.cos(theta_x)**2) + (lambda_ * w_x - q_x) * (math.sin(theta_x)**2) #this time, Veerle Ledoux did the algebra for me!
+
+def original_boundary_conditions_to_prufer_shooters(p, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b):
+    theta_a, theta_b = math.atan(y_a/(p(x_a)*dy__dx_a))+math.pi/2, math.atan(y_b/(p(x_b)*dy__dx_b))+math.pi/2 #the %math.pi/2 is to keep the thetas within 0,pi so that (theta_L(x_m)-theta_R(x_m))/math.pi actually counts the number of times theta is a multiple of pi between the two thetas. y is 0 when theta is a multiple of pi, and theta is monotonic increasing
+    return [x_a, theta_a], [x_b, theta_b]
+
+def Solve_Prufer_IVP(lambda_, p, q, w, x_init, theta_init, x_end, dx, store_solution=False):
+    x, theta = x_init, theta_init
+    if store_solution:
+        point_list = []
+    while x<x_end:
+        if store_solution:
+            point_list.append((x,theta))
+        dtheta__dx = Prufer_FD1(lambda_, p(x), q(x), w(x), theta)
+        x_new, theta_new = x+dx, theta+dtheta__dx*dx
+        x, theta = x_new, theta_new
+
+    if store_solution:
+        return theta, point_list
+    else:
+        return [theta]
+
+def LR_Prufer_Shots_Mismatch_lambda(lambda_, p, q, w, x_a, theta_a, x_b, theta_b, dx):
+    number_of_samples = (x_b - x_a)//dx
+
+    halfway_indice = number_of_samples//2 #for all i know flooring still makes this just (x_b - x_a)/2 or (x_b - x_a)//2, but i'm pretty sure it isn't
+    x_halfway = x_a + halfway_indice*dx
+
+    left_shot = Solve_Prufer_IVP(lambda_, p, q, w, x_a, theta_a, x_halfway, dx)
+    right_shot = Solve_Prufer_IVP(lambda_, p, q, w, x_b, theta_b, x_halfway, -dx)
+
+    return (left_shot[0] - right_shot[0])/(math.pi) #!!!the dividing by math.pi is probably correct. unsure if it misses eigenvals.
+
+def Make_Prufer_Mismatch(p, q, w, x_a, theta_a, x_b, theta_b, dx):
+    def Prufer_Mismatch(lambda_, dx=dx):
+        return LR_Prufer_Shots_Mismatch_lambda(lambda_, p, q, w, x_a, theta_a, x_b, theta_b, dx)
+
+    return Prufer_Mismatch
+
+def Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx):
+    shooter1, shooter2 = original_boundary_conditions_to_prufer_shooters(p, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b)
+    return Make_Prufer_Mismatch(p, q, w, *shooter1, *shooter2, dx)
+
+def find_ith_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, eigen_index, tolerance): #i is the eigen_index
+    tailored_prufer_mismatch = lambda lambda_: Prufer_Mismatch(lambda_) - eigen_index
+    eigen_val = Secant_Method(tailored_prufer_mismatch, 1, 2, tolerance)
+    return eigen_val
+
+def find_first_n_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, up_to_n_eigens, tolerance, custom_eigen_list=False): #custom_eigen_list overrides up_to_n_eigens
+    if not custom_eigen_list:
+        return map(lambda eigen_index: find_ith_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, eigen_index, tolerance), range(up_to_n_eigens))
+    else:
+        return map(lambda eigen_index: find_ith_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, eigen_index, tolerance), custom_eigen_list)
+
+def find_first_n_eigen_vals_given_original_boundary_conditions_prufer(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx, up_to_n_eigens, tolerance, custom_eigen_list=False):
+    Prufer_Mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
+    eigens = find_first_n_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, up_to_n_eigens, tolerance, custom_eigen_list=custom_eigen_list)
+
+    return eigens
+
+def find_eigen_funcs_given_eigen_vals(lambda_list, p, q, w, x_init, y_init, dy__dx_init, x_end, dx):
+    return map(lambda lambda_: Solve_LSLP_IVP(lambda_, p, q, w, x_init, y_init, dy__dx_init, x_end, dx, store_solution=True)[3], lambda_list)
+
+
+def boundary_conditions_to_shooters(conditions, mode="periodic"): #takes in some form of boundary conditions and outputs the shooter conditions. the solutions to the shooters for a given eigenvalue are a basis for the eigenspace of that eigenvalue. i'm pretty sure that's right. hopefully they do indeed have the same eigenvalue...
+    if mode=="periodic":
+        #conditions = [x_a, x_b]
+        #so y(a) = y(b) and y'(a) = y'(b), and we look at the interval y(a) to y(b). then the solutions are a 2D space. you can represent the solutions by their initial conditions, so [y(a), y'(a)] and then once you found the solutions to 2 lin indep init cond vectors, you then have a basis for the solution space. this is the space of solutions given an eigen value
+        #this function takes in the periodic conditions and outputs two pairs of shooter conditions, each pair being solvable for eigensolutions and eigenvalues. each eigenvalue has solutions that are linear combinations of the two eigensolutions thus generated. at least, i'm pretty sure that's how that works.
+        #shooters = x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b
+        shooters1 = conditions[0], 1, 0, conditions[1], 1, 0 #this is one normalized initial condition vector in the basis
+        shooters2 = conditions[0], 0, 1, conditions[1], 0, 1 #this is the other.
+        return shooters1, shooters2
+
+def particular_spanning_solutions_to_general(y_1, y_2, dx): #!!!use this
+    #so if y_1(a) = 1 and y'_1(a) = 0 and y_2(a) = 0 and y'_2(a) = 1 aka if we have really nice initial condition vectors spanning the thingy, then
+    #y = c_1y_1 + c_2y_2 can be solved to get y(a) = c_1 and y'(a) = c_2
+    dy_1__dx = NumD(y_1, dx)
+    dy_2__dx = NumD(y_2, dx)
+    def general_to_single_particular(x_a, y_a, dy__dx_a): #!!!allow for more general conditions, like periodic conditions.
+        matrix = np.array([[y_1(x_a), y_2(x_a)], [dy_1__dx(x_a), dy_2__dx(x_a)]])
+        solution_operator = np.linalg.inv(matrix)
+        outVector = np.array([y_a, dy__dx_a])
+        c_vector = np.matmul(solution_operator, outVector)
+        def single_particular(x):
+            return np.dot(c_vector, np.array([y_1(x), y_2(x)]))
+
+        return single_particular
+
+    return general_to_single_particular
+
+
+
+
+def plot_mismatch(possible_eigens, mismatch):
+    mismatch_vals, eigen_indices = np.vectorize(mismatch)(possible_eigens)
+
+    min_miss, max_miss = np.min(mismatch_vals), np.max(mismatch_vals)
+    y_abs_limit = np.min([abs(min_miss), abs(max_miss)])
+    y_range = [-y_abs_limit, y_abs_limit]
+
+    pw = pg.plot(possible_eigens, mismatch_vals, pen='r') #this is the plot widget
+    origin_x_axis = pg.InfiniteLine(0, 0, pen={'color':'b', 'style':DashLine})
+    pi = pw.getPlotItem()
+    vb = pi.getViewBox()
+    vb.setYRange(*y_range)
+    vb.addItem(origin_x_axis)
+
+
+def plot_eigen_funcs(list_of_list_of_coords, eigen_vals, color_eigen_as_zero_precision=3):
+    pw = pg.plot()
+    pi = pw.getPlotItem()
+    lowest_eigen_val = min(abs(eigen_val) for eigen_val in eigen_vals if abs(round(eigen_val, color_eigen_as_zero_precision)) > 0) #hugely negative and positive eigens are darker.
+    index = 0
+    for coord_list in list_of_list_of_coords:
+        coord_list = np.array(coord_list)
+        eigen_val = eigen_vals[index]
+        phi = (1 + 5**0.5) / 2
+        hue = ((index+1)*phi)%1 #if you multiply by phi mod 1 you get equidistribution by that one theorem (some source said phi was special for this, but i had thought it was true of all irrationals...). do index+1 times phi so that the start color isn't black so it's visible on the default (and morally superior) black background of pyqtgraph graphs
+        val = 1/math.log(abs(eigen_val/lowest_eigen_val), 3) if eigen_val>lowest_eigen_val else 1.0
+        uniqueish_pen = pg.mkPen(hsv=[hue, 1.0, val])
+        pi.plot(coord_list[:, 0], coord_list[:, 1], pen=uniqueish_pen)
+
+        index +=1
+
+    origin_x_axis = pg.InfiniteLine(0, 0, pen={'color':'b', 'style':DashLine})
+    list_of_list_of_coords.shape = (list_of_list_of_coords.shape[1]*list_of_list_of_coords.shape[0], 2)
+    y_min, y_max = list_of_list_of_coords.min(0)[1], list_of_list_of_coords.max(0)[1]
+
+    vb = pi.getViewBox()
+    vb.setYRange(y_min, y_max)
+    vb.addItem(origin_x_axis)
+
+
+
+'''
+mismatch = Make_Mismatch(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
+
+guess1 = 100.3
+guess2 = 100.5
+
+root, eigen_index = Secant_Method(mismatch, guess1, guess2, tolerance, f_index_to_rootfind=0)
+plot_mismatch(np.arange(-3,100,.1), mismatch)
+'''
+
+
+'''
+p,q,w = lambda x:1, lambda x: 0, lambda x: 1
+x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = boundary_conditions_to_shooters([0, 2*math.pi])[1]
+#d^2y/dx^2 = -\lambda y with periodic boundary conditions y(0)=y(2*\pi)=0. y'(0)=y'(2*\pi)=1 This is the equation for the azimuthal angle. The eigen_vals are the eigenvalues of -d^2/dx^2, and therefore the magnetic quantum number m=sqrt(\lambda)
+'''
+
+
+
+m=3
+p,q,w = lambda x: math.sin(x), lambda x: m/math.sin(x), lambda x: math.sin(x) #!!!figure out way to deal with blowup at 0, math.pi without resorting to analytical method
+x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = 0, 0, 1, math.pi, 0, 1
+#!!!frobenious method
+
+dx = .001
+tolerance = .001
+up_to_n_eigens = 15
+prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
+eigen_vals = list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)) #!!!fix mysterious missing of half the eigenvals
+eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, dx)))
+
+plot_eigen_funcs(eigen_funcs, eigen_vals)
