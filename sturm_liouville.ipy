@@ -23,6 +23,7 @@ import numpy as np
 #https://libstore.ugent.be/fulltxt/RUG01/001/050/950/RUG01-001050950_2010_0001_AC.pdf#page=28&zoom=130,39,29 - verle ledoux sturm liouville apprx
 #https://www.jstor.org/stable/2007594?seq=3#metadata_info_tab_contents - magic eigenfinder using minimum subeigenfinders (maybe it's a shooter?). advantages are it's just as good for far out eigenvals as for the first one (requiring ), the finding of the first eigenvalue on the subinterval is more accurate (same for the eigenfunction) [equilibriating the eigenfunctions is also accurate [also probably more accurate if itp as opposed to newton is used]],
 #https://dl.acm.org/doi/10.1145/3423597 and https://docs.rs/kurbo/0.8.1/src/kurbo/common.rs.html#194-237 - itp method - since prufer mismatch is monotonic (and 2nd diff? 2nd cont diff?) we get the error bound of epsilon [using the rust code's convention] on the zero, regardless (i think??) of the starting interval that contains the root.
+#https://www.sciencedirect.com/science/article/pii/S0010465508003305#fd007 - general numerical introduction, better explanation of pruess/coefficient approximation than ledoux - fixed mesh, resistant by instability nor stiffness, resistant/actively better error when eigenvalues go up, interval truncation, parralelizable, potentionally similar but easier and better magic than before
 
 '''
 We use the convention that the Sturm-Liouville problem is a real 2nd order ODE of the form d/dx [p(x)dy(x)/dx] - q(x)y(x) = -lambda w(x) y(x), where finding the possible eigenvalue lambda is part of the problem and thus unspecified
@@ -215,7 +216,7 @@ def find_ith_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, eigen_index, toler
     eigen_val = Secant_Method(tailored_prufer_mismatch, .1, .2, tolerance)
     return eigen_val
 
-def find_first_n_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, up_to_n_eigens, tolerance, custom_eigen_list=False, initial_guess_0=.1, next_guess_offset=.1): #custom_eigen_list overrides up_to_n_eigens
+def find_first_n_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, up_to_n_eigens, tolerance, custom_eigen_list=False, initial_guess_0=.1, next_guess_offset=-.001): #custom_eigen_list overrides up_to_n_eigens #since monotonic, and since we tend to approach from the left for most problems, and from general way things work, using the left works better
     if not custom_eigen_list:
         custom_eigen_list = range(up_to_n_eigens)
 
@@ -370,7 +371,7 @@ plot_mismatch(np.arange(-3,100,.1), mismatch)
 
 
 
-p,q,w = lambda x:1, lambda x: 0, lambda x: 1
+p,q,w = lambda x:1, lambda x: 0, lambda x: 1 #azimuthal equation
 x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = boundary_conditions_to_shooters([0, 2*math.pi])[0]
 #d^2y/dx^2 = -\lambda y with periodic boundary conditions y(0)=y(2*\pi)=0. y'(0)=y'(2*\pi)=1 This is the equation for the azimuthal angle. The eigen_vals are the eigenvalues of -d^2/dx^2, and therefore the magnetic quantum number m=sqrt(\lambda)
 
@@ -414,11 +415,11 @@ up_to_n_eigens = 15
 #plot_many_funcs(list_of_x_vals, np.vectorize(displacement_newton_param_by_i)(i_list))
 
 prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-#generic_plot(np.arange(-.5,10,.1), prufer_mismatch)
+generic_plot(np.arange(-.5,100,.1), prufer_mismatch)
 eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)))
 eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, dx)))
 plot_eigen_funcs(eigen_funcs, eigen_vals)
-magnetic_quantum_numbers = np.sqrt(eigen_vals)
+#magnetic_quantum_numbers = np.sqrt(eigen_vals)
 
 '''
 while True:
