@@ -152,7 +152,7 @@ def original_boundary_conditions_to_prufer_shooters(p, x_a, y_a, dy__dx_a, x_b, 
     if y_a != 0 and dy__dx_a == 0:
         sign = abs(y_a)/y_a * abs(p(x_a))/p(x_a)
         theta_a = math.atan(sign*np.inf)
-    elif y_a != 0 and dy__dx_a != 0:
+    elif dy__dx_a != 0:
         theta_a = math.atan(y_a/(p(x_a)*dy__dx_a))
     else:
         warn("Can't have boundary condition with wronskian [in this case, y, y'] = 0!")
@@ -161,7 +161,7 @@ def original_boundary_conditions_to_prufer_shooters(p, x_a, y_a, dy__dx_a, x_b, 
     if y_b != 0 and dy__dx_b == 0:
         sign = abs(y_b)/y_b * abs(p(x_b))/p(x_b)
         theta_b = math.atan(sign*np.inf)
-    elif y_b != 0 and dy__dx_a != 0:
+    elif dy__dx_a != 0:
         theta_b = math.atan(y_b/(p(x_b)*dy__dx_b))
     else:
         warn("Can't have boundary condition with wronskian [in this case, y, y'] = 0!")
@@ -199,7 +199,7 @@ def LR_Prufer_Shots_Mismatch_lambda(lambda_, p, q, w, x_a, theta_a, x_b, theta_b
     left_shot = Solve_Prufer_IVP(lambda_, p, q, w, x_a, theta_a, x_halfway, dx)
     right_shot = Solve_Prufer_IVP(lambda_, p, q, w, x_b, theta_b, x_halfway, -dx)
 
-    return (left_shot[0] - right_shot[0])/(math.pi) #!!!the dividing by math.pi is probably correct. unsure if it misses eigenvals.
+    return (left_shot[0] - right_shot[0])/(2*math.pi) #the dividing by 2*math.pi is probably correct. unsure if it misses eigenvals.
 
 def Make_Prufer_Mismatch(p, q, w, x_a, theta_a, x_b, theta_b, dx):
     def Prufer_Mismatch(lambda_, dx=dx):
@@ -372,7 +372,7 @@ plot_mismatch(np.arange(-3,100,.1), mismatch)
 
 
 p,q,w = lambda x:1, lambda x: 0, lambda x: 1 #azimuthal equation
-x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = boundary_conditions_to_shooters([0, 2*math.pi])[0]
+x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = boundary_conditions_to_shooters([0, 2*math.pi])[1]
 #d^2y/dx^2 = -\lambda y with periodic boundary conditions y(0)=y(2*\pi)=0. y'(0)=y'(2*\pi)=1 This is the equation for the azimuthal angle. The eigen_vals are the eigenvalues of -d^2/dx^2, and therefore the magnetic quantum number m=sqrt(\lambda)
 
 
@@ -415,15 +415,14 @@ up_to_n_eigens = 15
 #plot_many_funcs(list_of_x_vals, np.vectorize(displacement_newton_param_by_i)(i_list))
 
 prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-generic_plot(np.arange(-.5,100,.1), prufer_mismatch)
+generic_plot(np.arange(-30,100,.1), prufer_mismatch)
 eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)))
 eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, dx)))
 plot_eigen_funcs(eigen_funcs, eigen_vals)
 #magnetic_quantum_numbers = np.sqrt(eigen_vals)
 
-'''
+
 while True:
     stress_test_index = int(input())
     stress_m = (find_ith_eigen_val_given_Prufer_Mismatch(prufer_mismatch, stress_test_index, tolerance))**.5
     print(stress_m)
-'''
