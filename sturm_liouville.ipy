@@ -390,39 +390,42 @@ tolerance = .000001
 up_to_n_eigens = 15
 
 
-#prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-#displacement_newton = Make_Displacement_Newton(prufer_mismatch, dlambda=dx)
-#generic_plot(np.arange(-.5,10,.1), prufer_mismatch)
-#generic_plot(np.arange(-.5,10,.1), displacement_newton)
+'''
+prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
+generic_plot(np.arange(-.5,10,.1), prufer_mismatch)
+'''
 
+'''
+prufer_mismatches_param_by_dx = lambda dx: (lambda x: Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)(x) - 1)
+displacement_newton_param_by_dx = lambda dx: Make_Displacement_Newton(prufer_mismatches_param_by_dx(dx))
+index_addition_scaling_funcs_param_by_dx = lambda dx: lambda lambda_: 1/NumD(prufer_mismatches_param_by_dx(dx), dx, cmp_step=False)(lambda_) #on the plot, i_p*these + (the newton function for i=0) = (the newton function for i=i_p)
 
-#prufer_mismatches_param_by_dx = lambda dx: Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-#displacement_newton_param_by_dx = lambda dx: Make_Displacement_Newton(prufer_mismatches_param_by_dx(dx))
-#index_addition_scaling_funcs_param_by_dx = lambda dx: lambda lambda_: 1/NumD(prufer_mismatches_param_by_dx(dx), dx, cmp_step=False)(lambda_) #on the plot, i_p*these + (the newton function for i=0) = (the newton function for i=i_p)
+dx_list = np.arange(.02, .001, -.001)
+displacement_funcs = np.vectorize(displacement_newton_param_by_dx)(dx_list)
+index_addition_scaling_funcs = np.vectorize(index_addition_scaling_funcs_param_by_dx)(dx_list)
+interleaved_list = np.reshape(np.column_stack((displacement_funcs, index_addition_scaling_funcs)), -1) #shape dimension of -1 lets numpy figure out the length of the flattened interleaving from knowing it should by flat
 
-#dx_list = np.arange(.01, .001, -.001)
-#displacement_funcs = np.vectorize(displacement_newton_param_by_dx)(dx_list)
-#index_addition_scaling_funcs = np.vectorize(index_addition_scaling_funcs_param_by_dx)(dx_list)
-#interleaved_list = np.reshape(np.column_stack((displacement_funcs, index_addition_scaling_funcs)), -1) #shape dimension of -1 lets numpy figure out the length of the flattened interleaving from knowing it should by flat
+list_of_x_vals = np.tile(np.arange(.1,100,.1), [len(dx_list)*2,1])
+plot_many_funcs(list_of_x_vals, interleaved_list)
+'''
 
-#list_of_x_vals = np.tile(np.arange(.1,16,.1), [len(dx_list)*2,1])
-#plot_many_funcs(list_of_x_vals, interleaved_list)
-
-
-#displacement_newton_param_by_i = lambda i: Make_Displacement_Newton(lambda x: Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)(x) - i)
-#i_list = np.array(range(0,10))
-#list_of_x_vals = np.tile(np.arange(.1,16,.1), [len(i_list),1])
-#plot_many_funcs(list_of_x_vals, np.vectorize(displacement_newton_param_by_i)(i_list))
+'''
+displacement_newton_param_by_i = lambda i: Make_Displacement_Newton(lambda x: Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)(x) - i)
+i_list = np.array(range(0,10))
+list_of_x_vals = np.tile(np.arange(.1,16,.1), [len(i_list),1])
+plot_many_funcs(list_of_x_vals, np.vectorize(displacement_newton_param_by_i)(i_list))
+'''
 
 prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-generic_plot(np.arange(-30,100,.1), prufer_mismatch)
+#generic_plot(np.arange(-30,100,.1), prufer_mismatch)
 eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)))
 eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, dx)))
 plot_eigen_funcs(eigen_funcs, eigen_vals)
-#magnetic_quantum_numbers = np.sqrt(eigen_vals)
+magnetic_quantum_numbers = np.sqrt(eigen_vals)
 
-
+'''
 while True:
     stress_test_index = int(input())
     stress_m = (find_ith_eigen_val_given_Prufer_Mismatch(prufer_mismatch, stress_test_index, tolerance))**.5
     print(stress_m)
+'''
