@@ -49,7 +49,7 @@ def Limitable_Func(func, limiting_epsilon, give_up_iters=100, diverge_thresh=100
             return point_to_limit + (-1)**(i) * (.75)**(i)
         def func_seq(i):
             return func(converging_x_seq(i))
-        i = 2
+        i = 3
         f_0, f_1 = func_seq(1), func_seq(2)
         while abs(f_1 - f_0) >= limiting_epsilon:
             f_0, f_1 = f_1, func_seq(i)
@@ -74,8 +74,9 @@ def Limitable_Func(func, limiting_epsilon, give_up_iters=100, diverge_thresh=100
 def Make_Analytic_Funcs(p, q, w, lambda_, singular_point, dx, limiting_delta):
     dp__dx = FD1(p, dx)
 
-    analytic_for_y_func = Limitable_Func(lambda x: (x)**2 * (lambda_*w(x) - q(x)) / p(x) + bool(print(f"77: {x}")), limiting_delta)
-    analytic_for_dy__dx_func = Limitable_Func(lambda x: (x) * dp__dx(x) / p(x) + bool(print(f"78: {x}")), limiting_delta)
+    #!!!this is the wrong part!
+    analytic_for_y_func = Limitable_Func(lambda x: (x-singular_point)**2 * (lambda_*w(x-x_singular) - q(x-x_singular)) / p(x-x_singular) + bool(print(f"77: {x}")), limiting_delta)
+    analytic_for_dy__dx_func = Limitable_Func(lambda x: (x-singular_point) * dp__dx(x-x_singular) / p(x-x_singular) + bool(print(f"78: {x}")), limiting_delta)
 
     return analytic_for_y_func, analytic_for_dy__dx_func
 
@@ -99,14 +100,14 @@ def ith_solution_series_coeff_given_indicial_and_analytic_coeffs_and_r_and_past_
 
 
 l, m = 2, 0
-p = lambda x: (1-x**2)
-q = lambda x: m**2/(1-x**2)
+p = lambda x: math.e**(-x)
+q = lambda x: -math.e**(-x) * (-1+1/x)
 w = lambda x: 1
-lambda_ = l*(l+1)
-dx = .0001
+lambda_ = 0
+dx = .00001
 limiting_epsilon = .0001
 
-x_singular = 1
+x_singular = 0
 anal_y, anal_yprime = Make_Analytic_Funcs(p, q, w, lambda_, x_singular, dx, limiting_epsilon)
 anal_y_coeff, anal_yprime_coeff = anal_y(x_singular), anal_yprime(x_singular)
 
@@ -114,7 +115,7 @@ indicial = Make_Indicial(anal_y_coeff, anal_yprime_coeff)
 
 r = (-(anal_yprime_coeff-1) + ((anal_yprime_coeff-1)**2 - 4*anal_y_coeff)**.5)/2
 
-coeff_i = -.5
+coeff_i = 1
 coeff_list = []
 i = 0
 while True:
@@ -123,4 +124,4 @@ while True:
     coeff_i = ith_solution_series_coeff_given_indicial_and_analytic_coeffs_and_r_and_past_coeffs(indicial, r, anal_y, anal_yprime, 1, coeff_list, i, dx)
     input(coeff_i)
 
-#!!!note that something is wrong: it should be coeff_i = coeff_(i-1)/(i^2), but the code says (starting with coeff_0 = 1) approximately 1, 1, .5, .16, .04, [insert big number depending on dx and epsilon].
+#!!!note that something is wrong:
