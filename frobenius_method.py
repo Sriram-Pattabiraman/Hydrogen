@@ -74,7 +74,7 @@ def Limitable_Func(func, limiting_epsilon, give_up_iters=100, diverge_thresh=100
 def Make_Analytic_Funcs(p, q, w, lambda_, singular_point, dx, limiting_delta):
     dp__dx = FD1(p, dx)
 
-    #!!!this is the wrong part!
+    #!!!this is the wrong part?
     analytic_for_y_func = Limitable_Func(lambda x: (x-singular_point)**2 * (lambda_*w(x-x_singular) - q(x-x_singular)) / p(x-x_singular) + bool(print(f"77: {x}")), limiting_delta)
     analytic_for_dy__dx_func = Limitable_Func(lambda x: (x-singular_point) * dp__dx(x-x_singular) / p(x-x_singular) + bool(print(f"78: {x}")), limiting_delta)
 
@@ -89,25 +89,58 @@ def Make_Indicial(analytic_for_y_coeff, analytic_for_dy__dx_coeff):
 
 
 # the ith coeff is the coeff to x^(i+r) in the series, past coeff is in ascending order.
+'''
 def ith_solution_series_coeff_given_indicial_and_analytic_coeffs_and_r_and_past_coeffs(indicial, r, analytic_for_y_func, analytic_for_dy__dx_func, singular_point, past_coeffs, i, dx):
     acc = 0
     prev_part_fact = 1
     for j in range(i-1, -1, -1):
         prev_part_fact *= i-j
-        acc += (bool(print(f"96: j, i: {j, i}")) + (j+r) * FDN(lambda x: analytic_for_y_func(x) + bool(print(f"96.1: {x}")), i-j, dx)(singular_point) + FDN(lambda x: analytic_for_dy__dx_func(x) + bool(print(f"96.2: {x}")), i-j, dx)(singular_point)) / prev_part_fact * past_coeffs[j]
+        #acc += (bool(print(f"96: j, i: {j, i}")) + (j+r) * FDN(lambda x: analytic_for_y_func(x) + bool(print(f"96.1: {x}")), i-j, dx)(singular_point) + FDN(lambda x: analytic_for_dy__dx_func(x) + bool(print(f"96.2: {x}")), i-j, dx)(singular_point)) / prev_part_fact * past_coeffs[j]
+        fdif = (bool(print(f"96: j, i: {j, i}")) + (j+r) * analytic_for_y_func(singular_point)**(i-j) + analytic_for_dy__dx_func(singular_point)**(i-j) / prev_part_fact * past_coeffs[j])
+        acc += fdif
+        input(str(fdif)+' line 100')
 
-    return -1/(indicial(i+r)) * acc
+
+    return acc * -1/(indicial(i+r))
+'''
+
+#!!!for some reason, only last term in sum is used.
+#for the besesl function of order 1/2
+def ith_solution_series_coeff_given_indicial_and_analytic_coeffs_and_r_and_past_coeffs(indicial, r, analytic_for_y_func, analytic_for_dy__dx_func, singular_point, past_coeffs, i, dx):
+    this_coeff = (-1)**(i) * (bool(print(f"108.0:  i: {i}")) + (r) * FDN(lambda x: analytic_for_y_func(x) + bool(print(f"108.1: {x}")), i, dx)(singular_point) + FDN(lambda x: analytic_for_dy__dx_func(x) + bool(print(f"108.2: {x}")), i, dx)(singular_point)) / math.factorial(i) * past_coeffs[0]
+
+    return this_coeff
 
 
-l, m = 2, 0
-p = lambda x: math.e**(-x)
-q = lambda x: -math.e**(-x) * (-1+1/x)
-w = lambda x: 1
-lambda_ = 0
+
+
 dx = .00001
 limiting_epsilon = .0001
 
+#bessel
+nu = .5
+p = lambda x: x
+q = lambda x: nu**2/x - x
+w = lambda x: 0
+lambda_ = 0
+
+coeff_i = -(2/math.pi)**.5 #
 x_singular = 0
+
+
+'''
+#legendre
+l=3
+m=2
+p = lambda x: 1-x**2
+q = lambda x: m**2/(1-x**2)
+w = lambda x: 1
+lambda_ = l*(l+1)
+
+coeff_i = 15
+x_singular = 1
+'''
+
 anal_y, anal_yprime = Make_Analytic_Funcs(p, q, w, lambda_, x_singular, dx, limiting_epsilon)
 anal_y_coeff, anal_yprime_coeff = anal_y(x_singular), anal_yprime(x_singular)
 
@@ -115,13 +148,13 @@ indicial = Make_Indicial(anal_y_coeff, anal_yprime_coeff)
 
 r = (-(anal_yprime_coeff-1) + ((anal_yprime_coeff-1)**2 - 4*anal_y_coeff)**.5)/2
 
-coeff_i = 1
+
 coeff_list = []
 i = 0
 while True:
     coeff_list.append(coeff_i)
     i += 1
     coeff_i = ith_solution_series_coeff_given_indicial_and_analytic_coeffs_and_r_and_past_coeffs(indicial, r, anal_y, anal_yprime, 1, coeff_list, i, dx)
-    input(coeff_i)
+    input(str(coeff_i) + " outer loop, line 146")
 
 #!!!note that something is wrong:
