@@ -37,16 +37,23 @@ Sometimes, and for the programmed prufer implementation, p, q or w [for us q] >0
 
 def NumD(f, dx, cmp_step=True): #returns NUMericalDerivatives using the complex step method, with finite difference method as a fallback for higher orders.
     if cmp_step:
-        #since this is quantum mechanics, things tend to be complex valued. assuming continuity is equivalent to assuming it's holomorphic is equivalent to analytic. expanding f(x + ih) as a taylor series and then taking the imaginary part, f'(x) = Im(f(x+ih))/h + O(h^2). this also doesn't have as bad issues of floating point error when h is small, as unlike finite differences, this is well conditioned.
-        return lambda x: f(x+dx*1j).imag/dx #only works for first order for reasons.
+        def f_prime(x):
+            try:
+                #since this is quantum mechanics, things tend to be complex valued. assuming continuity is equivalent to assuming it's holomorphic is equivalent to analytic. expanding f(x + ih) as a taylor series and then taking the imaginary part, f'(x) = Im(f(x+ih))/h + O(h^2). this also doesn't have as bad issues of floating point error when h is small, as unlike finite differences, this is well conditioned.
+                f(x+dx*1j).imag/dx #only works for first order for reasons.
+            except TypeError:
+                return NumD(f, dx, cmp_step=False)(x)
+        return f_prime
     else:
         return lambda x: (f(x+dx)-f(x-dx))/(2*dx)
 
 #!!!use the ITP method - perhaps use secant to find an interval first.
-def Secant_Method(f, x_0, x_1, tolerance, f_index_to_rootfind=False, low_deriv_warning_thresh=.0001, give_up_iterations=100, give_up_displacement_mag_factor=100): #secant method is finite difference version of newton's method
+def Secant_Method(f, x_0, x_1, tolerance, f_index_to_rootfind=False, low_deriv_warning_thresh=.0001, give_up_iterations=100, give_up_displacement_mag_factor=200, random_inits_if_fail=10, random_n0_range=[-10,50], random_step_range=[-.01,.01]): #secant method is finite difference version of newton's method
     #WARNING: The oscillatory nature of the mismatch function means this may fail catastrophically.
     low_deriv_warning_fired = False
     i=0
+    randos = 0
+    chosen_randos = []
     if f_index_to_rootfind is False: #using "is" to prevent 0==False
         if i > give_up_iterations:
             warn("More than give_up_iterations have been exceeded! We may be in a cycle, or diverging to ±infinity. ")
@@ -63,11 +70,29 @@ def Secant_Method(f, x_0, x_1, tolerance, f_index_to_rootfind=False, low_deriv_w
                 low_deriv_warning_fired = True
             x_n2 = x_n1 - f(x_n1)*(1/derivative) #f * dx/df = f / (df/dx) is why this agrees with wikipedia
             if abs(x_n2/x_0) > give_up_displacement_mag_factor:
-                warn("x/x_0 is bigger than the give_up_displacement_mag_factor! It probably has no zeros, or has a zero at ±infinity. We're brazenly assuming it has a zero at ±infinity")
-                if x_n2 > 0:
-                    return np.inf
-                elif x_n2 < 0:
-                    return -np.inf
+                warn("x/x_0 is bigger than the give_up_displacement_mag_factor! It probably has no zeros, or has a zero at ±infinity")
+                if randos >= random_inits_if_fail:
+                    if random_inits_if_fail > 0:
+                        warn(f"Failed for {randos} random inits! here are the sampled inits:\n{chosen_randos}")
+                    warn("We're brazenly assuming it has a zero at ±infinity")
+                    if x_n2 > 0:
+                        return np.inf
+                    elif x_n2 < 0:
+                        return -np.inf
+                elif random_inits_if_fail > 0:
+                    randos += 1
+                    x_0 = np.random.uniform(*random_n0_range)
+                    x_n0 = x_0
+                    x_n1 = x_n0+np.random.uniform(*random_step_range)
+
+                    chosen_randos.append([x_n0, x_n1])
+                    if randos > 0:
+                        warn("trying random initial guesses!")
+                    thisF = f(x_n1)
+                    i = 0
+                    low_deriv_warning_fired = False
+                    continue
+
 
             x_n0, x_n1 = x_n1, x_n2
             i+=1
@@ -92,6 +117,86 @@ def Secant_Method(f, x_0, x_1, tolerance, f_index_to_rootfind=False, low_deriv_w
             thisF = f(x_n1)
 
         return x_n1, thisF[:f_index_to_rootfind]+thisF[f_index_to_rootfind:]
+
+
+def Monotone_Find_Bracket(f, x_0, initial_step=1, adjusting_factor=2, giveup_displacement=1000):
+    starting_x = x_0
+    thisF = f(x_0)
+
+    #find initial direction
+    if abs(thisF) == 0:
+        return x_0
+    elif thisF > 0:
+        direction = -1
+    else:
+        direction = 1
+
+    #now let's loop to find the other end of the interval
+    step = initial_step
+    bracket = [x_0, np.inf] if direction == 1 else [-np.inf, x_0]
+    while True:
+        if thisF > 0:
+            new_direction = -1
+        else:
+            new_direction = 1
+
+        if new_direction != direction:
+            if direction == 1:
+                bracket[1] = x_0
+            else:
+                bracket[0] = x_0
+
+            return bracket
+        else:
+            if direction == 1:
+                bracket[0] = x_0
+            else:
+                bracket[1] = x_0
+
+        if abs(x_0 - starting_x) > giveup_displacement:
+            warn(f"Moved more than {giveup_displacement} while trying to find a sign change to bracket, but still failed! Assuming the other end is that infinity")
+            return bracket
+
+        step = initial_step * adjusting_factor
+        x_0 += step * direction
+        thisF = f(x_0)
+
+
+def Bisection_Method(f, init_bracket, tolerance):
+    if init_bracket[0] == -np.inf and init_bracket[1] == np.inf:
+        warn("bad bracket! can't have both infinities!")
+        raise BaseException
+    elif init_bracket[0] == -np.inf:
+        warn("lower bound of bracket is -np.inf! assuming root is -np.inf")
+        return -np.inf, np.nan
+    elif init_bracket[1] == np.inf:
+        warn("upper bound of bracket is np.inf! assuming root is np.inf")
+        return np.inf, np.nan
+
+    bracket = init_bracket
+    errorBound = (bracket[1] - bracket[0]) / 2
+    midpoint = bracket[0] + errorBound
+
+    thisF = f(midpoint)
+    while True:
+        if thisF > tolerance:
+            bracket[1] = midpoint
+        elif thisF < -tolerance:
+            bracket[0] = midpoint
+        else:
+            return midpoint, errorBound
+
+        errorBound = (bracket[1] - bracket[0]) / 2
+        midpoint = bracket[0] + errorBound
+        thisF = f(midpoint)
+
+
+def Monotone_Root_Find(f, x_0, tolerance, initial_step=1, adjusting_factor=2):
+    bracket = Monotone_Find_Bracket(f, x_0, initial_step=initial_step, adjusting_factor=adjusting_factor)
+    root, errorBound = Bisection_Method(f, bracket, tolerance)
+
+    return root, errorBound
+
 
 def LSLP_FD2(lambda_, p_x, q_x, w_x, dp__dx_x, y_x, dy__dx_x): #LSLP is Lambda Sturm-Liouville Problem aka lambda is given. #returns the finite 2nd order difference as a function of lambda_, y_x, and dy__dx_x; where p_x,q_x,y_x are p(x),q(x),y(x) evaluated at x (think of solving an IVP using Euler's method)
     return (-lambda_*w_x*y_x + q_x*y_x - dp__dx_x * dy__dx_x)/p_x #hopefully i did my algebra right. if i did, then this is d^2y/dx^2
@@ -211,35 +316,37 @@ def Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, d
     shooter1, shooter2 = original_boundary_conditions_to_prufer_shooters(p, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b)
     return Make_Prufer_Mismatch(p, q, w, *shooter1, *shooter2, dx)
 
-def find_ith_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, eigen_index, tolerance, guess_0=.1, guess_1=.2): #i is the eigen_index
+def find_ith_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, eigen_index, tolerance, guess_0=0, initial_step=1, adjusting_factor=2): #i is the eigen_index
     tailored_prufer_mismatch = lambda lambda_: Prufer_Mismatch(lambda_) - eigen_index
-    eigen_val = Secant_Method(tailored_prufer_mismatch, .1, .2, tolerance)
-    return eigen_val
+    eigen_val, error = Monotone_Root_Find(tailored_prufer_mismatch, guess_0, tolerance, initial_step=initial_step, adjusting_factor=adjusting_factor)
+    return eigen_val, error
 
-def find_first_n_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, up_to_n_eigens, tolerance, custom_eigen_list=False, initial_guess_0=.1, next_guess_offset=-.001): #custom_eigen_list overrides up_to_n_eigens #since monotonic, and since we tend to approach from the left for most problems, and from general way things work, using the left works better
+def find_first_n_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, up_to_n_eigens, tolerance, custom_eigen_list=False, initial_guess_0=0, initial_step=1, adjusting_factor=2): #custom_eigen_list overrides up_to_n_eigens #since monotonic, and since we tend to approach from the left for most problems, and from general way things work, using the left works better
     if not custom_eigen_list:
         custom_eigen_list = range(up_to_n_eigens)
 
-    guess_0, guess_1 = initial_guess_0, initial_guess_0 + next_guess_offset
+    guess_0 = initial_guess_0
     out_list = []
     for eigen_index in tqdm(custom_eigen_list):
-        eigen_val = find_ith_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, eigen_index, tolerance, guess_0=guess_0, guess_1=guess_1)
+        eigen_val, error = find_ith_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, eigen_index, tolerance, guess_0=guess_0, initial_step=initial_step, adjusting_factor=adjusting_factor)
         if abs(eigen_val)==np.inf: #throw out infinite eigen_val
             continue
 
-        out_list.append(eigen_val)
-        guess_0, guess_1 = eigen_val, eigen_val+next_guess_offset
+        out_list.append([eigen_val, error])
+        guess_0 = eigen_val
 
     return out_list
 
 
-def find_first_n_eigen_vals_given_original_boundary_conditions_prufer(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx, up_to_n_eigens, tolerance, custom_eigen_list=False):
+def find_first_n_eigen_vals_given_original_boundary_conditions_prufer(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx, up_to_n_eigens, tolerance, custom_eigen_list=False, initial_guess_0=0, initial_step=1, adjusting_factor=2):
     Prufer_Mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-    eigens = find_first_n_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, up_to_n_eigens, tolerance, custom_eigen_list=custom_eigen_list)
+    eigens = find_first_n_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, up_to_n_eigens, tolerance, custom_eigen_list=custom_eigen_list, initial_guess_0=initial_guess_0, initial_step=initial_step, adjusting_factor=adjusting_factor)
 
     return eigens
 
 def find_eigen_funcs_given_eigen_vals(lambda_list, p, q, w, x_init, y_init, dy__dx_init, x_end, dx):
+    #!!!accept error bounds in the lambda_list by brazenly ignoring them
+    #!!!weird error for legendre with "
     return map(lambda lambda_: Solve_LSLP_IVP(lambda_, p, q, w, x_init, y_init, dy__dx_init, x_end, dx, store_solution=True)[3], lambda_list)
 
 
@@ -370,20 +477,22 @@ plot_mismatch(np.arange(-3,100,.1), mismatch)
 '''
 
 
-
+'''
 p,q,w = lambda x:1, lambda x: 0, lambda x: 1 #azimuthal equation
 x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = boundary_conditions_to_shooters([0, 2*math.pi])[1]
 #d^2y/dx^2 = -\lambda y with periodic boundary conditions y(0)=y(2*\pi)=0. y'(0)=y'(2*\pi)=1 This is the equation for the azimuthal angle. The eigen_vals are the eigenvalues of -d^2/dx^2, and therefore the magnetic quantum number m=sqrt(\lambda)
-
-
-
 '''
+
+
+
 m=3
-p,q,w = lambda x: math.sin(x), lambda x: m/math.sin(x), lambda x: math.sin(x) #!!!figure out way to deal with blowup at 0, math.pi without resorting to analytical method
-x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = 0, 0, 1, math.pi, 0, 1
-'''
+boundary_epsilon = .01
+p,q,w = lambda x: math.sin(x), lambda x: m**2/math.sin(x), lambda x: math.sin(x)
+init_wronsk = [0,1]
+x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = 0+boundary_epsilon, *init_wronsk, math.pi-boundary_epsilon, *init_wronsk
 
-#!!!frobenious method
+
+
 
 dx = .001
 tolerance = .000001
@@ -409,7 +518,7 @@ list_of_x_vals = np.tile(np.arange(.1,100,.1), [len(dx_list)*2,1])
 plot_many_funcs(list_of_x_vals, interleaved_list)
 '''
 
-'''
+'''g
 displacement_newton_param_by_i = lambda i: Make_Displacement_Newton(lambda x: Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)(x) - i)
 i_list = np.array(range(0,10))
 list_of_x_vals = np.tile(np.arange(.1,16,.1), [len(i_list),1])
@@ -417,11 +526,11 @@ plot_many_funcs(list_of_x_vals, np.vectorize(displacement_newton_param_by_i)(i_l
 '''
 
 prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-#generic_plot(np.arange(-30,100,.1), prufer_mismatch)
-eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)))
+generic_plot(np.arange(-30,100,.1), prufer_mismatch)
+eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)))[:,0].round(1)
 eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, dx)))
 plot_eigen_funcs(eigen_funcs, eigen_vals)
-magnetic_quantum_numbers = np.sqrt(eigen_vals)
+#magnetic_quantum_numbers = np.sqrt(eigen_vals)
 
 '''
 while True:
