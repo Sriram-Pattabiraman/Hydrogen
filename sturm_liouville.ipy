@@ -17,7 +17,9 @@ DashLine = PyQt5.QtCore.Qt.DashLine #doing this as a from import doesn't work fo
 %gui qt5
 
 import math
+import cmath
 import numpy as np
+from scipy import constants
 
 #references for future me:
 #https://libstore.ugent.be/fulltxt/RUG01/001/050/950/RUG01-001050950_2010_0001_AC.pdf#page=28&zoom=130,39,29 - verle ledoux sturm liouville apprx
@@ -40,7 +42,7 @@ def NumD(f, dx, cmp_step=True): #returns NUMericalDerivatives using the complex 
         def f_prime(x):
             try:
                 #since this is quantum mechanics, things tend to be complex valued. assuming continuity is equivalent to assuming it's holomorphic is equivalent to analytic. expanding f(x + ih) as a taylor series and then taking the imaginary part, f'(x) = Im(f(x+ih))/h + O(h^2). this also doesn't have as bad issues of floating point error when h is small, as unlike finite differences, this is well conditioned.
-                f(x+dx*1j).imag/dx #only works for first order for reasons.
+                return f(x+dx*1j).imag/dx #only works for first order for reasons.
             except TypeError:
                 return NumD(f, dx, cmp_step=False)(x)
         return f_prime
@@ -119,13 +121,13 @@ def Secant_Method(f, x_0, x_1, tolerance, f_index_to_rootfind=False, low_deriv_w
         return x_n1, thisF[:f_index_to_rootfind]+thisF[f_index_to_rootfind:]
 
 
-def Monotone_Find_Bracket(f, x_0, initial_step=1, adjusting_factor=2, giveup_displacement=1000):
+def Monotone_Find_Bracket(f, x_0, initial_step=1, adjusting_factor=2, giveup_steps=100, giveup_displacement=1000):
     starting_x = x_0
     thisF = f(x_0)
 
     #find initial direction
     if abs(thisF) == 0:
-        return x_0
+        return [x_0, x_0]
     elif thisF > 0:
         direction = -1
     else:
@@ -134,6 +136,7 @@ def Monotone_Find_Bracket(f, x_0, initial_step=1, adjusting_factor=2, giveup_dis
     #now let's loop to find the other end of the interval
     step = initial_step
     bracket = [x_0, np.inf] if direction == 1 else [-np.inf, x_0]
+    step_count = 0
     while True:
         if thisF > 0:
             new_direction = -1
@@ -154,15 +157,22 @@ def Monotone_Find_Bracket(f, x_0, initial_step=1, adjusting_factor=2, giveup_dis
                 bracket[1] = x_0
 
         if abs(x_0 - starting_x) > giveup_displacement:
+            print("gaveup displacement")
             warn(f"Moved more than {giveup_displacement} while trying to find a sign change to bracket, but still failed! Assuming the other end is that infinity")
             return bracket
 
+        if step_count > giveup_steps:
+            print("gaveup steps")
+            warn(f"Moved more than {giveup_steps} while trying to find a sign change to bracket, but still failed! Assuming the other end is that infinity")
+            return bracket
+
+        step_count += 1
         step = initial_step * adjusting_factor
         x_0 += step * direction
         thisF = f(x_0)
 
 
-def Bisection_Method(f, init_bracket, tolerance):
+def Bisection_Method(f, init_bracket, tolerance, giveup_steps=100, report=False):
     if init_bracket[0] == -np.inf and init_bracket[1] == np.inf:
         warn("bad bracket! can't have both infinities!")
         raise BaseException
@@ -174,11 +184,15 @@ def Bisection_Method(f, init_bracket, tolerance):
         return np.inf, np.nan
 
     bracket = init_bracket
-    errorBound = (bracket[1] - bracket[0]) / 2
-    midpoint = bracket[0] + errorBound
-
-    thisF = f(midpoint)
+    steps = 0
     while True:
+        errorBound = (bracket[1] - bracket[0]) / 2
+        midpoint = (bracket[0] + bracket[1])/2
+        thisF = f(midpoint)
+
+        if report:
+            print(f"Bisection report: bracket, midpoint, thisF: {bracket}, {midpoint}, {thisF}")
+
         if thisF > tolerance:
             bracket[1] = midpoint
         elif thisF < -tolerance:
@@ -186,12 +200,16 @@ def Bisection_Method(f, init_bracket, tolerance):
         else:
             return midpoint, errorBound
 
-        errorBound = (bracket[1] - bracket[0]) / 2
-        midpoint = bracket[0] + errorBound
-        thisF = f(midpoint)
+        if steps > giveup_steps:
+            warn("more than giveup steps while bisecting! returning best so far.")
+            print('bisection gave up steps')
+            return midpoint, errorBound
+
+        steps += 1
 
 
-def Monotone_Root_Find(f, x_0, tolerance, initial_step=1, adjusting_factor=2):
+
+def Monotone_Root_Find(f, x_0, tolerance, initial_step=1, adjusting_factor=2): #!!!consider specialized prufer root find or dx-paramaterized root find that dynamically adjusts dx as it zeros in on the root (early on, don't actually need as much precision as later). same goes for the rest of this category of functions.
     bracket = Monotone_Find_Bracket(f, x_0, initial_step=initial_step, adjusting_factor=adjusting_factor)
     root, errorBound = Bisection_Method(f, bracket, tolerance)
 
@@ -242,7 +260,6 @@ def LR_Shots_Mismatch_lambda(lambda_, p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy_
     return p(x_halfway)*left_shot[1]*right_shot[0] - p(x_halfway)*right_shot[1]*left_shot[0], eigen_index
 
 def Make_Mismatch(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx):
-    #!!!find a way to take advantage of the fact that it's mostly the same IVP for each lambda without incurring huge memory costs
     #ideas to refactor: do the x_0 sample of all the eigens at once, then do the x_0+1dx, and so on. this way the p,q,w,dp__dx_x are still only computed once, but now don't need to be stored beyond that step.
     def Mismatch(lambda_, dx=dx): #returns the mismatch and the eigenindex
         return LR_Shots_Mismatch_lambda(lambda_, p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
@@ -252,24 +269,30 @@ def Make_Mismatch(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx):
 
 def Prufer_FD1(lambda_, p_x, q_x, w_x, theta_x): #d\theta/dx = 1/p cos^2(\theta) + (\lambda * w - q) * sin^2(\theta)
     return (1/p_x)*(math.cos(theta_x)**2) + (lambda_ * w_x - q_x) * (math.sin(theta_x)**2) #this time, Veerle Ledoux did the algebra for me!
+    #return (1/p_x)*(cmath.cos(theta_x)**2) + (lambda_ * w_x - q_x) * (cmath.sin(theta_x)**2) #this time, Veerle Ledoux did the algebra for me!
 
-def original_boundary_conditions_to_prufer_shooters(p, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b):
-    if y_a != 0 and dy__dx_a == 0:
+
+def original_boundary_conditions_to_prufer_shooters(p, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b): #!!!verify complexification.
+    if y_a != 0 and p(x_a)*dy__dx_a == 0:
         sign = abs(y_a)/y_a * abs(p(x_a))/p(x_a)
         theta_a = math.atan(sign*np.inf)
+        #theta_a = cmath.acos((p(x_a)*dy__dx_a).real / (y_a*y_a.conjugate() + (p(x_a)*dy__dx_a)*(p(x_a)*dy__dx_a).conjugate())**.5)
     elif dy__dx_a != 0:
-        theta_a = math.atan(y_a/(p(x_a)*dy__dx_a))
+        theta_a = math.atan(y_a/(p(x_a)*dy__dx_a)) #the convention by verle ledoux puts this within 0,pi but the part that actually matters is that they are normalized in a way that the mismatch for the kth eigenvalue is k. this convention also does that. also means no do the atan2.
+        #theta_a = cmath.acos((p(x_a)*dy__dx_a).real / (y_a*y_a.conjugate() + (p(x_a)*dy__dx_a)*(p(x_a)*dy__dx_a).conjugate())**.5)
     else:
-        warn("Can't have boundary condition with wronskian [in this case, y, y'] = 0!")
+        warn("Can't have boundary condition with wronskian [well, the almost wronskian because it uses py' instead of y']  0!")
         raise(BaseException) #zero boundary wronskian
 
-    if y_b != 0 and dy__dx_b == 0:
+    if y_b != 0 and p(x_b) * dy__dx_b == 0:
         sign = abs(y_b)/y_b * abs(p(x_b))/p(x_b)
         theta_b = math.atan(sign*np.inf)
-    elif dy__dx_a != 0:
+        #theta_b = cmath.acos((p(x_b)*dy__dx_b).real / (y_b*y_b.conjugate() + (p(x_b)*dy__dx_b)*(p(x_b)*dy__dx_b).conjugate())**.5)
+    elif p(x_b)* dy__dx_b != 0:
         theta_b = math.atan(y_b/(p(x_b)*dy__dx_b))
+        #theta_b = cmath.acos((p(x_b)*dy__dx_b).real / (y_b*y_b.conjugate() + (p(x_b)*dy__dx_b)*(p(x_b)*dy__dx_b).conjugate())**.5)
     else:
-        warn("Can't have boundary condition with wronskian [in this case, y, y'] = 0!")
+        warn("Can't have boundary condition with wronskian [kinda wronskian cuz py' instead of p] [in this case, y, py'] = 0!")
         raise BaseException #zero boundary wronskian
 
     return [x_a, theta_a], [x_b, theta_b]
@@ -339,14 +362,13 @@ def find_first_n_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, up_to_n_eigens
 
 
 def find_first_n_eigen_vals_given_original_boundary_conditions_prufer(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx, up_to_n_eigens, tolerance, custom_eigen_list=False, initial_guess_0=0, initial_step=1, adjusting_factor=2):
+    #!!!use this...
     Prufer_Mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-    eigens = find_first_n_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, up_to_n_eigens, tolerance, custom_eigen_list=custom_eigen_list, initial_guess_0=initial_guess_0, initial_step=initial_step, adjusting_factor=adjusting_factor)
+    eigensAndErrors = find_first_n_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, up_to_n_eigens, tolerance, custom_eigen_list=custom_eigen_list, initial_guess_0=initial_guess_0, initial_step=initial_step, adjusting_factor=adjusting_factor)
 
-    return eigens
+    return eigensAndErrors
 
-def find_eigen_funcs_given_eigen_vals(lambda_list, p, q, w, x_init, y_init, dy__dx_init, x_end, dx):
-    #!!!accept error bounds in the lambda_list by brazenly ignoring them
-    #!!!weird error for legendre with "
+def find_eigen_funcs_given_eigen_vals(lambda_list, p, q, w, x_init, y_init, dy__dx_init, x_end, dx):#!!!idea for these dx's to be smaller - higher dx to locate eigenvalue, lower dx when doing final pass computing of the function - less accuarcy needed to zero in on the right root (also that op is more costly), and then can speed up during final pass
     return map(lambda lambda_: Solve_LSLP_IVP(lambda_, p, q, w, x_init, y_init, dy__dx_init, x_end, dx, store_solution=True)[3], lambda_list)
 
 
@@ -379,7 +401,7 @@ def particular_spanning_solutions_to_general(y_1, y_2, dx): #!!!use this
 
 
 
-def generic_plot(x_vals, func): #!!!note: should consistently make this func, vals. actually come up with a consistent argument order in general. also you should make a consistent naming and capitalization scheme. right now there's like 4 different ones.
+def generic_plot(x_vals, func):
     y_vals = np.vectorize(func)(x_vals)
 
     min_y, max_y = np.min(y_vals), np.max(y_vals)
@@ -447,19 +469,18 @@ def plot_eigen_funcs(list_of_list_of_coords, eigen_vals, color_eigen_as_zero_pre
     lowest_eigen_val = min(abs(eigen_val) for eigen_val in eigen_vals if abs(round(eigen_val, color_eigen_as_zero_precision)) > 0) #hugely negative and positive eigens are darker.
     index = 0
     for coord_list in list_of_list_of_coords:
-        coord_list = np.array(coord_list)
+        #coord_list = np.array(coord_list)
         eigen_val = eigen_vals[index]
         phi = (1 + 5**0.5) / 2
         hue = ((index+1)*phi)%1 #if you multiply by phi mod 1 you get equidistribution by that one theorem (some source said phi was special for this, but i had thought it was true of all irrationals...). do index+1 times phi so that the start color isn't black so it's visible on the default (and morally superior) black background of pyqtgraph graphs
         val = 1/math.log(abs(eigen_val/lowest_eigen_val), 3) if eigen_val>lowest_eigen_val else 1.0
+        val = val if 0<val<=1 else 1
         uniqueish_pen = pg.mkPen(hsv=[hue, 1.0, val])
         pi.plot(coord_list[:, 0], coord_list[:, 1], pen=uniqueish_pen)
 
         index +=1
 
     origin_x_axis = pg.InfiniteLine(0, 0, pen={'color':'b', 'style':DashLine})
-    list_of_list_of_coords.shape = (list_of_list_of_coords.shape[1]*list_of_list_of_coords.shape[0], 2)
-    y_min, y_max = list_of_list_of_coords.min(0)[1], list_of_list_of_coords.max(0)[1]
 
     vb = pi.getViewBox()
     vb.addItem(origin_x_axis)
@@ -477,26 +498,48 @@ plot_mismatch(np.arange(-3,100,.1), mismatch)
 '''
 
 
-'''
+'''#azimuth (magnetic quantum number) #!!!try this with wronsk = [1, 1j] and [-1j, 1] or similar [sols are complex for this equation]
 p,q,w = lambda x:1, lambda x: 0, lambda x: 1 #azimuthal equation
 x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = boundary_conditions_to_shooters([0, 2*math.pi])[1]
 #d^2y/dx^2 = -\lambda y with periodic boundary conditions y(0)=y(2*\pi)=0. y'(0)=y'(2*\pi)=1 This is the equation for the azimuthal angle. The eigen_vals are the eigenvalues of -d^2/dx^2, and therefore the magnetic quantum number m=sqrt(\lambda)
 '''
 
 
-
+'''#polar (azimuthal quantum number)
 m=3
 boundary_epsilon = .01
 p,q,w = lambda x: math.sin(x), lambda x: m**2/math.sin(x), lambda x: math.sin(x)
 init_wronsk = [0,1]
 x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = 0+boundary_epsilon, *init_wronsk, math.pi-boundary_epsilon, *init_wronsk
+'''
+
+#radial
+electron_mass, proton_mass = constants.electron_mass, constants.proton_mass
+reduced_mass = electron_mass*proton_mass/(electron_mass+proton_mass)
+
+electron_charge = constants.elementary_charge
+vaccuum_permittivity = constants.epsilon_0
+
+hbar = constants.hbar
+
+reduced_mass, electron_charge, hbar, vaccuum_permittivity = .5,1,1,1/(4*math.pi)
+
+#!!!figure out radial solution - boundary conditions, how to generalize the factoring of an r^-1, etc.
+#https://arxiv.org/ftp/arxiv/papers/1502/1502.04008.pdf
+l = 1
+boundary_epsilon = .0001
+boundary_inf_approx = 1000
+#p,q,w = lambda x: x**2, lambda x: l*(l+1) - ((2*reduced_mass)*(x**2)/(hbar**2)) * ((electron_charge**2)/(4*math.pi*vaccuum_permittivity*x)), lambda x: ((2*reduced_mass)*(x**2)/(hbar**2))
+p,q,w = lambda x: 1, lambda x: l*(l+1)/x - 1/x, lambda x: 1
+deriv_at_zero, deriv_at_inf = 1,.001
+free_boundary_params = [deriv_at_zero, deriv_at_inf]
+x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = 0+boundary_epsilon, 0, deriv_at_zero, boundary_inf_approx, .001, free_boundary_params[1]
 
 
 
-
-dx = .001
-tolerance = .000001
-up_to_n_eigens = 15
+dx = .01
+tolerance = .0001
+up_to_n_eigens = 5
 
 
 '''
@@ -518,7 +561,7 @@ list_of_x_vals = np.tile(np.arange(.1,100,.1), [len(dx_list)*2,1])
 plot_many_funcs(list_of_x_vals, interleaved_list)
 '''
 
-'''g
+'''
 displacement_newton_param_by_i = lambda i: Make_Displacement_Newton(lambda x: Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)(x) - i)
 i_list = np.array(range(0,10))
 list_of_x_vals = np.tile(np.arange(.1,16,.1), [len(i_list),1])
@@ -526,8 +569,8 @@ plot_many_funcs(list_of_x_vals, np.vectorize(displacement_newton_param_by_i)(i_l
 '''
 
 prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-generic_plot(np.arange(-30,100,.1), prufer_mismatch)
-eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)))[:,0].round(1)
+#Sgeneric_plot(np.arange(-10,10,.1), prufer_mismatch)
+eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)))[:,0].round(5)
 eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, dx)))
 plot_eigen_funcs(eigen_funcs, eigen_vals)
 #magnetic_quantum_numbers = np.sqrt(eigen_vals)
