@@ -13,8 +13,10 @@ from warnings import warn
 import pyqtgraph as pg
 import PyQt5
 DashLine = PyQt5.QtCore.Qt.DashLine #doing this as a from import doesn't work for unknown reasons.
+import IPython
 #start the qt5 event loop
 %gui qt5
+app =  pg.Qt.mkQApp()
 
 import math
 import cmath
@@ -172,7 +174,7 @@ def Monotone_Find_Bracket(f, x_0, initial_step=1, adjusting_factor=2, giveup_ste
         thisF = f(x_0)
 
 
-def Bisection_Method(f, init_bracket, tolerance, giveup_steps=100, report=False):
+def Bisection_Method(f, init_bracket, tolerance, giveup_steps=100, report=True):
     if init_bracket[0] == -np.inf and init_bracket[1] == np.inf:
         warn("bad bracket! can't have both infinities!")
         raise BaseException
@@ -339,6 +341,166 @@ def Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, d
     shooter1, shooter2 = original_boundary_conditions_to_prufer_shooters(p, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b)
     return Make_Prufer_Mismatch(p, q, w, *shooter1, *shooter2, dx)
 
+
+
+
+
+
+
+
+def full_shot_from_start_and_end(start_shot_vector, end_shot_vector): #for schrodinger problems
+    full_shot_vector = np.stack([np.concat(start_shot_vector, [0,0]), np.concat([0,0], end_shot_vector)]).transpose()
+    return full_shot_vector
+
+def bake_potentials_into_mesh(potential, baked_mesh): #is an inplace function #takes a baked_mesh, and outputs a baked_mesh with the potentials.
+    #baked so that the potential on the interval is stored at the left endpoint indice. the rightmost endpoint simply gets the potential value there as an approximation - the rest are averages of the potential at the endpoints.
+    if type(baked_mesh) == dict: #it's a baked mesh
+        mesh = baked_mesh["mesh"]
+    else:
+        raise(TypeError) #mesh_or_baked_mesh wasn't of an expected type!
+
+    approximate_potentials = []
+    for left_indice in range(len(mesh)-1):
+        approximate_potentials.append((potential(mesh[left_indice]) + potential(mesh[left_indice+1])) / 2)
+
+    approximate_potentials.append(potential(mesh[-1]))
+
+    baked_mesh["potentials"] = approximate_potentials
+    return
+
+
+#the following Ixaru stuff can be relatively easily obtained by solving the differential equation with constant potential approximation on each interval. the cos and sin and cosh and sinh come from the fundamental solutions of that, and the arguments of them (that is, Z) comes from the constant in the differential equation. putting delta in Z seems to just be a way to compute Z once and use it repeatedly, but to delta it just doesn't do anything as it squares and then square roots to place it into the trig funcs.
+def Ixaru_Xi(Z): #verle ledoux calls these \xi and \eta_0, and they are used to construct the prop_mats by giving them a value Z(\delta). Z itself depends on the potential's approximation on the interval and on the claimed eigenvalue, and of course depends on \delta (which is the amout you are stepping forward)
+    if Z <= 0:
+        return math.cos(abs(Z)**.5)
+    else:
+        return math.cosh(abs(Z)**.5)
+
+def Ixaru_Eta_0(Z):
+    if Z < 0:
+        return math.sin(abs(Z)**.5)/(abs(Z)**.5)
+    elif Z == 0:
+        return 1
+    else:
+        return math.sinh(Z**.5)/(Z**.5)
+
+def Ixaru_Z(potential_approximation, delta, lambda_): #ledoux just calls this "Z". used for to put into the reference propogators that form the prop mats.
+    return (potential_approximation - lambda_) * (delta**2)
+
+def Make_Reference_Funcs(potential_approximation, delta, lambda_):
+    Z = Ixaru_Z(potential_approximation, delta, lambda_)
+
+    reference_u = Ixaru_Xi(Z)
+    reference_v = delta * Ixaru_Eta_0(Z)
+    reference_u_prime = Z * Ixaru_Eta_0(delta)/delta
+    reference_v_prime = Ixaru_Xi(Z)
+    return reference_u, reference_u_prime, reference_v, reference_v_prime
+
+def Make_Prop_Mat_Forward(potential_approximation, delta, lambda_):
+    reference_u, reference_u_prime, reference_v, reference_v_prime = Make_Reference_Funcs(potential_approximation, delta, lambda_)
+    return np.array([ [reference_u, reference_v], [reference_u_prime, reference_v_prime] ])
+
+def Make_Prop_Mat_Backward(potential_approximation, delta, lambda_):
+    reference_u, reference_u_prime, reference_v, reference_v_prime = Make_Reference_Funcs(potential_approximation, delta, lambda_)
+    return np.array([ [reference_v_prime, -reference_v], [-reference_u_prime, reference_u] ])
+
+def CPM_Method_Shoot_And_Mismatch(baked_mesh, full_shot_vector, lambda_, matching_point_index=None): #takes in the prop_mats for a schrodinger problem and the full_shot_vector is the initial shot at both endpoints giving left then right in a single vector. baked_mesh has a bunch of information, including the mesh itself, and is a dictionary so that i don't forget what the things are. #!!!stubby top down code this stuff.
+    #!!!implement energy derivative tracking for newton's method
+    #!!!see if newton's method is actually more practical than bisection here
+    if matching_point_index is None:
+        matching_point_index = len(baked_mesh["mesh"])//2
+
+    mesh = baked_mesh["mesh"]
+    potential_approximations = baked_mesh["potentials"] #potentials are given on the interval to the right of the point. e.g. potential_approximations[0] gives the potential from x_0 to x_1.
+    current_full_shot_vector = np.copy(full_shot_vector)
+
+    left_index = 0
+    right_index = len(mesh)-1
+    while left_index < matching_point_index and right_index > matching_point_index:
+        if left_index < matching_point_index:
+            delta_forward = mesh[left_index+1] - mesh[left_index]
+            prop_mat_forward = Make_Prop_Mat_Forward(potential_approximations[left_index], delta_forward, lambda_)
+            left_index += 1
+        else:
+            prop_mat_forward = np.ones((2,2))
+
+        if right_index > matching_point_index:
+            delta_backward = mesh[right_index] - mesh[right_index-1]
+            prop_mat_backward = Make_Prop_Mat_Backward(potential_approximations[right_index-1], delta_backward, lambda_)
+            right_index -= 1
+        else:
+            prop_mat_backward = np.ones((2,2))
+
+
+        current_full_prop_mat = np.block([ [prop_mat_forward, np.zeros((2,2))], [np.zeros((2,2)), prop_mat_backward] ])
+        #print(current_full_prop_mat)
+        #print("times")
+        #print(current_full_shot_vector)
+        #print('equals')
+        current_full_shot_vector = np.dot(current_full_prop_mat, current_full_shot_vector)
+        #print(current_full_shot_vector)
+
+    raw_nested_shot_mids = np.vectorize(lambda v: np.array(np.hsplit(v,2)), signature='(2,2)->(2,2,1)')(np.array(np.split(current_full_shot_vector, 2)))
+    shot_mids_mat = np.hstack([raw_nested_shot_mids[0], raw_nested_shot_mids[1]])
+    mismatch = np.linalg.det(shot_mids_mat)
+    return mismatch
+#correct for: mathieu with k_0=1 e_0=5, magnetic, coffey-evans with beta=20 as long as you make very close initial guesses,
+
+def CPM_Convert_EigenvalBound_To_EigenindiceBound(delta_theta, search_bounds): #takes in delta_theta and search_bounds, outputs indices
+    return math.floor(delta_theta(search_bounds[0])/math.pi), math.floor(delta_theta(search_bounds[1])/math.pi - 1)
+
+
+#all the previous cpm stuff works only for schrodinger problems, that is one's that look like y''(x) - V(x) = -E y(x). fortunately, there's a transformation known as the liouville transformation that puts sturm liouville problems in "Liouville Normal Form" that has the right form. unfortunately, it's not pretty.
+#for the following: x is the new independent variable, r is the old independent variable, V is the new potential, p q and w are old coefficient functions, z is the old dependent variable, y is the new dependent variable.
+def Custom_Liouville_Integration(func, r_start, r_end,): #!!!code this
+    raise(NotImplemented)
+
+def find_contained_interval(val, mesh_of_vals): #suppose mesh_of_vals is a list of monotone vals (e.g. one representing a mesh). this function takes in a value, and finds the mesh vals/mesh "interval" that surrounds it. note that this really works for all ordered lists.
+    for lower_indice in range(len(mesh_of_vals)-1):
+        if val > mesh_of_vals[lower_indice]:
+            return lower_indice, lower_indice+1
+
+    print("out of mesh bounds!")
+    raise ArithmeticError #out of mesh bounds #!!!figure out how to make actual error classes already! this is silly!!
+
+
+def Smart_R_Mesh_Make_And_Bake(p_of_r, w_of_r, r_min, r_max): #!!!code this
+    raise(NotImplemented)
+def Smart_Find_X_Given_R(requested_r, r_mesh_baked_with_xs):
+
+
+def Make_Liouville_Sigma_Given_R(p_of_r, q_of_r, w_of_r):
+    return lambda r: (p_of_r(r) * w_of_r(r)) ** (-.25)
+
+
+
+
+
+'''
+potential = lambda x: 10*math.cos(2*x) #mathieu problem with k_0 = 1 and e_0 = 5 according to https://www.researchgate.net/figure/46_tbl2_344652900
+mesh = {"mesh": np.arange(0,math.pi,.01)}
+bake_potentials_into_mesh(potential,mesh)
+full_shot_vector = np.array([0,1,0,1])
+#generic_plot(mesh["mesh"], lambda x: mesh["potentials"][np.where(mesh["mesh"]==x)[0][0]])
+mis = lambda lambda_: CPM_Method_Shoot_And_Mismatch(mesh, full_shot_vector, lambda_)
+generic_plot(np.arange(-10,110,.1), mis)
+#first ten eigens according to source: -5.7901 2.0995 9.2363 16.6482 25.5109 36.3589 49.2696 64.2047 81.7732 100.6887
+'''
+
+'''
+potential = lambda x: -2*20*math.cos(2*x) + 400*(math.sin(2*x)**2) #coffey-evans problem with beta = 20
+mesh = {"mesh": np.arange(-math.pi/2,math.pi/2,.01)}
+bake_potentials_into_mesh(potential,mesh)
+full_shot_vector = np.array([0,1,0,1])
+#generic_plot(mesh["mesh"], lambda x: mesh["potentials"][np.where(mesh["mesh"]==x)[0][0]])
+mis = lambda lambda_: CPM_Method_Shoot_And_Mismatch(mesh, full_shot_vector, lambda_)
+generic_plot(np.arange(0,100,.1), mis)
+'''
+
+
+
+
+
 def find_ith_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, eigen_index, tolerance, guess_0=0, initial_step=1, adjusting_factor=2): #i is the eigen_index
     tailored_prufer_mismatch = lambda lambda_: Prufer_Mismatch(lambda_) - eigen_index
     eigen_val, error = Monotone_Root_Find(tailored_prufer_mismatch, guess_0, tolerance, initial_step=initial_step, adjusting_factor=adjusting_factor)
@@ -487,18 +649,11 @@ def plot_eigen_funcs(list_of_list_of_coords, eigen_vals, color_eigen_as_zero_pre
 
 
 
+
+
+
 '''
-mismatch = Make_Mismatch(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-
-guess1 = 100.3
-guess2 = 100.5
-
-root, eigen_index = Secant_Method(mismatch, guess1, guess2, tolerance, f_index_to_rootfind=0)
-plot_mismatch(np.arange(-3,100,.1), mismatch)
-'''
-
-
-'''#azimuth (magnetic quantum number) #!!!try this with wronsk = [1, 1j] and [-1j, 1] or similar [sols are complex for this equation]
+#azimuth (magnetic quantum number) #!!!try this with wronsk = [1, 1j] and [-1j, 1] or similar [sols are complex for this equation]
 p,q,w = lambda x:1, lambda x: 0, lambda x: 1 #azimuthal equation
 x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = boundary_conditions_to_shooters([0, 2*math.pi])[1]
 #d^2y/dx^2 = -\lambda y with periodic boundary conditions y(0)=y(2*\pi)=0. y'(0)=y'(2*\pi)=1 This is the equation for the azimuthal angle. The eigen_vals are the eigenvalues of -d^2/dx^2, and therefore the magnetic quantum number m=sqrt(\lambda)
@@ -513,6 +668,8 @@ init_wronsk = [0,1]
 x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = 0+boundary_epsilon, *init_wronsk, math.pi-boundary_epsilon, *init_wronsk
 '''
 
+
+'''
 #radial
 electron_mass, proton_mass = constants.electron_mass, constants.proton_mass
 reduced_mass = electron_mass*proton_mass/(electron_mass+proton_mass)
@@ -527,19 +684,20 @@ reduced_mass, electron_charge, hbar, vaccuum_permittivity = .5,1,1,1/(4*math.pi)
 #!!!figure out radial solution - boundary conditions, how to generalize the factoring of an r^-1, etc.
 #https://arxiv.org/ftp/arxiv/papers/1502/1502.04008.pdf
 l = 1
-boundary_epsilon = .0001
-boundary_inf_approx = 1000
+boundary_epsilon = .001
+boundary_inf_approx = 100
 #p,q,w = lambda x: x**2, lambda x: l*(l+1) - ((2*reduced_mass)*(x**2)/(hbar**2)) * ((electron_charge**2)/(4*math.pi*vaccuum_permittivity*x)), lambda x: ((2*reduced_mass)*(x**2)/(hbar**2))
-p,q,w = lambda x: 1, lambda x: l*(l+1)/x - 1/x, lambda x: 1
-deriv_at_zero, deriv_at_inf = 1,.001
+p,q,w = lambda x: 1, lambda x: l*(l+1)/(-x) - 1/(-x), lambda x: 1
+deriv_at_zero, deriv_at_inf = 1,1
 free_boundary_params = [deriv_at_zero, deriv_at_inf]
-x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = 0+boundary_epsilon, 0, deriv_at_zero, boundary_inf_approx, .001, free_boundary_params[1]
+x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = 0+boundary_epsilon, 0, free_boundary_params[0], boundary_inf_approx, 0, free_boundary_params[1]
+'''
 
 
 
-dx = .01
-tolerance = .0001
-up_to_n_eigens = 5
+dx = .001
+tolerance = .01
+up_to_n_eigens = 3
 
 
 '''
@@ -568,16 +726,36 @@ list_of_x_vals = np.tile(np.arange(.1,16,.1), [len(i_list),1])
 plot_many_funcs(list_of_x_vals, np.vectorize(displacement_newton_param_by_i)(i_list))
 '''
 
+
+
+'''
 prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-#Sgeneric_plot(np.arange(-10,10,.1), prufer_mismatch)
+generic_plot(np.arange(-10,20,.1), prufer_mismatch)
 eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)))[:,0].round(5)
-eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, dx)))
+eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, dx*2)))
 plot_eigen_funcs(eigen_funcs, eigen_vals)
 #magnetic_quantum_numbers = np.sqrt(eigen_vals)
+'''
 
 '''
 while True:
-    stress_test_index = int(input())
-    stress_m = (find_ith_eigen_val_given_Prufer_Mismatch(prufer_mismatch, stress_test_index, tolerance))**.5
-    print(stress_m)
+    free_boundary_params = [float(i) for i in input('derivs: ').split(',')]
+    boundary_epsilon, boundary_inf_approx = [float(i) for i in input('boundaries: ').split(',')]
+    func_vals = [float(i) for i in input('func_vals: ').split(',')]
+    x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = 0+boundary_epsilon, func_vals[0], free_boundary_params[0], boundary_inf_approx, func_vals[1], free_boundary_params[1]
+
+    prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
+    eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance, custom_eigen_list=range(1,up_to_n_eigens))))[:,0].round(5)
+    eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, boundary_inf_approx/100)))
+    plot_eigen_funcs(eigen_funcs, eigen_vals)
+    print("look!")
+    print(eigen_vals)
+    print(free_boundary_params)
+    print(boundary_epsilon, boundary_inf_approx)
+    print(func_vals)
+    while True:
+        try:
+            app.processEvents()
+        except KeyboardInterrupt:
+            break
 '''
