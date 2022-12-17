@@ -24,6 +24,7 @@ import numpy as np
 from scipy import constants
 
 #references for future me:
+#the one that everyone copies from: numerical solution of sturm liouville problems by J.D. pryce, isbn 13: 9780198534150.
 #https://libstore.ugent.be/fulltxt/RUG01/001/050/950/RUG01-001050950_2010_0001_AC.pdf#page=28&zoom=130,39,29 - verle ledoux sturm liouville apprx
 #https://www.jstor.org/stable/2007594?seq=3#metadata_info_tab_contents - magic eigenfinder using minimum subeigenfinders (maybe it's a shooter?). advantages are it's just as good for far out eigenvals as for the first one (requiring ), the finding of the first eigenvalue on the subinterval is more accurate (same for the eigenfunction) [equilibriating the eigenfunctions is also accurate [also probably more accurate if itp as opposed to newton is used]],
 #https://dl.acm.org/doi/10.1145/3423597 and https://docs.rs/kurbo/0.8.1/src/kurbo/common.rs.html#194-237 - itp method - since prufer mismatch is monotonic (and 2nd diff? 2nd cont diff?) we get the error bound of epsilon [using the rust code's convention] on the zero, regardless (i think??) of the starting interval that contains the root.
@@ -452,28 +453,51 @@ def CPM_Convert_EigenvalBound_To_EigenindiceBound(delta_theta, search_bounds): #
 
 #all the previous cpm stuff works only for schrodinger problems, that is one's that look like y''(x) - V(x) = -E y(x). fortunately, there's a transformation known as the liouville transformation that puts sturm liouville problems in "Liouville Normal Form" that has the right form. unfortunately, it's not pretty.
 #for the following: x is the new independent variable, r is the old independent variable, V is the new potential, p q and w are old coefficient functions, z is the old dependent variable, y is the new dependent variable.
-def Custom_Liouville_Integration(func, r_start, r_end,): #!!!code this
-    raise(NotImplemented)
+def Custom_Liouville_Integration(func, r_start, r_end, n=100): #!!!code this specially?? make n used elsewhere? this is a stubby prototype
+    dx = (r_end - r_start) / n
+    acc = 0
+    for i in range(n): #MRAM
+        acc += func(r_start + (i/2)*dx) * dx
+    return acc
 
 def find_contained_interval(val, mesh_of_vals): #suppose mesh_of_vals is a list of monotone vals (e.g. one representing a mesh). this function takes in a value, and finds the mesh vals/mesh "interval" that surrounds it. note that this really works for all ordered lists.
     for lower_indice in range(len(mesh_of_vals)-1):
-        if val > mesh_of_vals[lower_indice]:
-            return lower_indice, lower_indice+1
+        lower, upper = mesh_of_vals[lower_indice], mesh_of_vals[lower_indice+1]
+        if lower <= val <= upper:
+            return lower_indice
 
     print("out of mesh bounds!")
     raise ArithmeticError #out of mesh bounds #!!!figure out how to make actual error classes already! this is silly!!
 
+def Make_Liouville_Q_Integrand(p_of_r, w_of_r):#this is the integrand used to do a liouville transformation of the independent variables. x = \int_{r_{min}}^{r} \sqrt {\frac {w(r')} {p(r')}} dr'
+    return lambda r: (w_of_r(r)/p_of_r(r))**.5
 
-def Smart_R_Mesh_Make_And_Bake(p_of_r, w_of_r, r_min, r_max): #!!!code this
+def Dumb_Double_Mesh_Make(Q_Integrand, r_mesh):
+    double_coordinate_mesh = {"r_mesh": r_mesh}
+    x_vals = [0.0]
+    for left_indice in range(len(double_coordinate_mesh["r_mesh"])-1):
+        net_change_in_x = (Custom_Liouville_Integration(Q_Integrand,r_mesh[left_indice],r_mesh[left_indice+1])) #also called Q.
+        x_vals.append(x_vals[-1]+net_change_in_x)
+    double_coordinate_mesh["x_mesh"] = x_vals
+    return double_coordinate_mesh
+
+def Smart_Double_Mesh_Make(p_of_r, w_of_r, r_min, r_max): #!!!code this
     raise(NotImplemented)
-def Smart_Find_X_Given_R(requested_r, r_mesh_baked_with_xs):
 
+def Make_Smart_Find_X_Given_R(Q_Integrand, requested_r, double_coordinate_mesh):
+    lower_contained_indice = find_contained_interval(requested_r, double_coordinate_mesh["r_mesh"])
+    return double_coordinate_mesh["x_mesh"][lower_contained_indice] + Custom_Liouville_Integration(Q_Integrand, double_coordinate_mesh["r_mesh"][lower_contained_indice], requested_r)
+def Make_Smart_Find_R_Given_X(Q_Integrand, requested_x, double_coordinate_mesh):
+    lower_contained_indice = find_contained_interval(requested_x, double_coordinate_mesh["x_mesh"])
+    return lambda r: Custom_Liouville_Integration(Q_Integrand, double_coordinate_mesh["r_mesh"][lower_contained_indice], r) - requested_x + double_coordinate_mesh["x_mesh"][lower_contained_indice]
 
 def Make_Liouville_Sigma_Given_R(p_of_r, q_of_r, w_of_r):
     return lambda r: (p_of_r(r) * w_of_r(r)) ** (-.25)
 
+def Make_Potential_Of_X_Given_R_of_X(q_of_r, w_of_r, sigma_of_r, r_of_x, dx): #all the sources have this, but the only one that actually makes it clear what the equation means is J.D. Pryce's book Numerical Solution of Sturm Liouville Problems, and it really looks like everyone else copied the specific equation from Pyrce while forgetting to copy the explanatory note.
+    return lambda x: q_of_r(r_of_x(x))/w_of_r(r_of_x(x)) + sigma_of_r(r_of_x(x)) * NumD(NumD(lambda r: 1/sigma_of_r(r_of_x(x)), dx, cmp_step=False), dx, cmp_step=False)
 
-
+#!!!set up thing that will transform to liouville and then give to cpm method
 
 
 '''
