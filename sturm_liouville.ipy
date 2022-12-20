@@ -65,15 +65,18 @@ def Secant_Method(f, x_0, x_1, tolerance, f_index_to_rootfind=False, low_deriv_w
             raise BaseException #more than give_up_iterations #yes i know it's bad practice to not actually use a helpfully named exception class.
 
         x_n0, x_n1 = x_0, x_1
+        prevF = f(x_0)
         thisF = f(x_n1)
         while abs(thisF) >= tolerance:
             dx = x_n1-x_n0
-            df = f(x_n1)-f(x_n0)
+            df = thisF-prevF
+            print(f"secant debugging: {thisF}, {dx}, {df}")
+            print(f"secant deriv: {df/dx}")
             derivative = df/dx
             if abs(derivative) < low_deriv_warning_thresh and not low_deriv_warning_fired: #don't warn if already warned in this run of the method
                 warn("Derivative is smaller than warning threshold! Catastrophe may ensue!")
                 low_deriv_warning_fired = True
-            x_n2 = x_n1 - f(x_n1)*(1/derivative) #f * dx/df = f / (df/dx) is why this agrees with wikipedia
+            x_n2 = x_n1 - thisF*(1/derivative) #f * dx/df = f / (df/dx) is why this agrees with wikipedia
             if (x_0 > 0 and abs(x_n2/x_0) > give_up_displacement_mag_factor) and (abs(x_n2-x_0)>sanity_give_up_displacement_difference):
                 warn("x/x_0 is bigger than the give_up_displacement_mag_factor! It probably has no zeros, or has a zero at ±infinity")
                 if randos >= random_inits_if_fail:
@@ -93,6 +96,7 @@ def Secant_Method(f, x_0, x_1, tolerance, f_index_to_rootfind=False, low_deriv_w
                     chosen_randos.append([x_n0, x_n1])
                     if randos > 0:
                         warn("trying random initial guesses!")
+                    prevF = f(x_n0)
                     thisF = f(x_n1)
                     i = 0
                     low_deriv_warning_fired = False
@@ -101,6 +105,7 @@ def Secant_Method(f, x_0, x_1, tolerance, f_index_to_rootfind=False, low_deriv_w
 
             x_n0, x_n1 = x_n1, x_n2
             i+=1
+            prevF = thisF
             thisF = f(x_n1)
 
         return x_n1
@@ -360,16 +365,16 @@ def full_shot_from_start_and_end(start_shot_vector, end_shot_vector): #for schro
 def bake_potentials_into_mesh(potential, baked_mesh, indep_var_mesh_key="mesh"): #is an inplace function #takes a baked_mesh, and outputs a baked_mesh with the potentials.
     #baked so that the potential on the interval is stored at the left endpoint indice. the rightmost endpoint simply gets the potential value there as an approximation - the rest are averages of the potential at the endpoints.
     if type(baked_mesh) == dict: #it's a baked mesh
-        mesh = baked_mesh[indep_var_mesh_key]
+        length = len(baked_mesh[indep_var_mesh_key])
     else:
         raise(TypeError) #mesh_or_baked_mesh wasn't of an expected type!
 
     approximate_potentials = []
     print("Baking Potentials...")
-    for left_indice in tqdm(range(len(mesh)-1)):
-        approximate_potentials.append((potential(mesh[left_indice]) + potential(mesh[left_indice+1])) / 2)
+    for left_indice in tqdm(range(length-1)):
+        approximate_potentials.append((potential(baked_mesh, left_indice) + potential(baked_mesh, left_indice+1)) / 2)
 
-    approximate_potentials.append(potential(mesh[-1]))
+    approximate_potentials.append(potential(baked_mesh, length-1))
 
     baked_mesh["potential_mesh"] = approximate_potentials
     return
@@ -400,7 +405,7 @@ def Make_Reference_Funcs(pot_minus_lambda, delta, xi_out, eta_out):
     #!!!handle div by 0
     reference_u = xi_out
     reference_u_prime = abs_z_over_delta_times_sqrt_abs_z * eta_out
-    reference_v = abs(eta_out/abs_z_over_delta_times_sqrt_abs_z)
+    reference_v = abs(eta_out/abs_z_over_delta_times_sqrt_abs_z) if abs_z_over_delta_times_sqrt_abs_z!=0 else delta
     reference_v_prime = xi_out
     return reference_u, reference_u_prime, reference_v, reference_v_prime
 
@@ -483,72 +488,147 @@ def Bake_Local_Scaling_Factors(baked_mesh, global_scaling_factor, lambda_, indep
 def Adjust_Prufer_Angle(unadjusted_angle, rescaling_ratio): #rescaling ratio is new_scale/old_scale, and is denoted in many sources (pyrce, ledoux) as "\sigma", not to be confused with the unrelated "\sigma" used in the Liouville transformation.
     return unadjusted_angle + math.atan2((rescaling_ratio-1)*math.sin(rescaling_ratio)*math.cos(rescaling_ratio), 1 + (rescaling_ratio - 1) * (math.sin(rescaling_ratio)**2))
 
-def Step_Prufer_Left_Forward(baked_mesh, left_index, global_scaling_factor, current_prufer_left, current_left_shot_vector, next_left_shot_vector):
+def Constricted_Looping_Monotone_Angle_To_Total_Monotone_Angle(current_total_monotone_angle, constricted_looping_monotone_angle, prev_constricted_looping_monotone_angle, direction="up"): #constricted_looping_monotone_angle constricted between -\pi, \pi, monotone increasing but loops
+    intra_loop_angle_delta = constricted_looping_monotone_angle - prev_constricted_looping_monotone_angle
+    if direction=="up":
+        if intra_loop_angle_delta < 0:
+            current_total_monotone_angle += 2*math.pi + intra_loop_angle_delta
+        else:
+            current_total_monotone_angle += intra_loop_angle_delta
+    elif direction=="down":
+        if intra_loop_angle_delta > 0:
+            current_total_monotone_angle += -2*math.pi + intra_loop_angle_delta
+        else:
+            current_total_monotone_angle += intra_loop_angle_delta
+
+    return current_total_monotone_angle
+
+
+AD_HOC_INT_BUFFERER = .1 #!!!wrong, perhaps remove?
+def Step_Prufer_Left_Forward(baked_mesh, current_prufer_left, prev_intra_loop_angle_left, left_index, global_scaling_factor, current_left_shot_vector, next_left_shot_vector):
     local_scaling_factor = baked_mesh["local_scaling_factor_left_mesh"][left_index]
     if local_scaling_factor=="Barrier Case!": #barrier case: E<=V
-        raw_end_theta = math.atan(global_scaling_factor*(next_left_shot_vector[0]/next_left_shot_vector[1]))
+        raw_end_theta = math.atan2(global_scaling_factor*next_left_shot_vector[0], next_left_shot_vector[1])
+        prufer_left_global = math.atan2(global_scaling_factor*current_left_shot_vector[0], current_left_shot_vector[1])
         if (current_left_shot_vector[0] == 0 or next_left_shot_vector[0] == 0) or (current_left_shot_vector[0] > 0 and next_left_shot_vector[0] > 0) or (current_left_shot_vector[0] < 0 and next_left_shot_vector[0] < 0):
-            if current_prufer_left > 0 and raw_end_theta < 0:
-                return raw_end_theta + math.pi
-            elif current_prufer_left < 0 and raw_end_theta > 0:
-                return raw_end_theta - math.pi
+            if prufer_left_global > 0 and raw_end_theta < 0:
+                final_right_angle = raw_end_theta + math.pi
+            elif prufer_left_global < 0 and raw_end_theta > 0:
+                final_right_angle = raw_end_theta - math.pi
             else:
-                return raw_end_theta
+                final_right_angle = raw_end_theta
         else:
-            if (current_prufer_left > 0 and raw_end_theta > 0) or (current_prufer_left < 0 and raw_end_theta < 0):
-                return raw_end_theta + math.pi
+            if (prufer_left_global > 0 and raw_end_theta > 0) or (prufer_left_global < 0 and raw_end_theta < 0):
+                final_right_angle = raw_end_theta + math.pi
             else:
-                return raw_end_theta
+                final_right_angle = raw_end_theta
+
+        new_total_prufer_right = Constricted_Looping_Monotone_Angle_To_Total_Monotone_Angle(current_prufer_left, final_right_angle, prev_intra_loop_angle_left)
+        return new_total_prufer_right, final_right_angle
+
     else: #well case: E>V
-        linear_unadjusted_right_angle = local_scaling_factor * baked_mesh["delta_forward_mesh"][left_index] + math.atan(local_scaling_factor*(current_left_shot_vector[0]/current_left_shot_vector[1]))
-        end_constant_corrector = math.atan(local_scaling_factor*(next_left_shot_vector[0]/next_left_shot_vector[1]))
-        predicted_linear_phase = linear_unadjusted_right_angle%math.pi
+        #ledoux uses "atan", but it should be "atan2" - this is probably just her forgetting to clarify or assuming the reader implicitly understood that fact.
+        linear_unadjusted_right_angle = local_scaling_factor * baked_mesh["delta_forward_mesh"][left_index] + math.atan2(local_scaling_factor*current_left_shot_vector[0], current_left_shot_vector[1])
+        end_constant_corrector = math.atan2(local_scaling_factor*next_left_shot_vector[0], next_left_shot_vector[1])
+        integer_part_determiner = linear_unadjusted_right_angle/math.pi
+        if abs(integer_part_determiner)%1 < AD_HOC_INT_BUFFERER and int(integer_part_determiner)!=0:
+            if int(integer_part_determiner) > 0:
+                integer_part = int(integer_part_determiner) - 1
+            elif int(integer_part_determiner) < 0:
+                integer_part = int(integer_part_determiner) + 1
+        else:
+            integer_part = int(integer_part_determiner)
+
+        predicted_linear_phase = linear_unadjusted_right_angle #- integer_part*math.pi
         phase_correction = end_constant_corrector-predicted_linear_phase
+        #print(f"phase_correction raw: {phase_correction}")
+        #print(f"predicted lin left {predicted_linear_phase}, end const corr left {end_constant_corrector}, lin unadjust left for right {linear_unadjusted_right_angle}")
         if phase_correction < -math.pi/2:
-            phase_correction += math.pi
-        elif phase_correction > math.pi/2: #ledoux has a case for this, i don't actually see how it's possible.
-            print(f"phase_correction > math.pi/2, {phase_correction}, {end_constant_corrector}, {predicted_linear_phase}, {local_scaling_factor}")
-            phase_correction -= math.pi
+            range_canonicalization_corrector = math.pi
+        elif phase_correction > math.pi/2:
+            range_canonicalization_corrector = -math.pi
+        else:
+            range_canonicalization_corrector = 0
 
-        final_unadjusted_right_angle = linear_unadjusted_right_angle + phase_correction
+        if abs(phase_correction + range_canonicalization_corrector) > .01:
+            #input('ahh!')
+            pass
+
+        #print(f"var integer_part: {integer_part}")
+        #print(f"the thing: {linear_unadjusted_right_angle/math.pi}")
+
+        final_unadjusted_right_angle = linear_unadjusted_right_angle + phase_correction + range_canonicalization_corrector
         final_right_angle = Adjust_Prufer_Angle(final_unadjusted_right_angle, global_scaling_factor/local_scaling_factor)
-        return final_right_angle
+        #print(f"final_right: {final_right_angle}")
+        new_total_prufer_right = Constricted_Looping_Monotone_Angle_To_Total_Monotone_Angle(current_prufer_left, final_right_angle, prev_intra_loop_angle_left)
+
+        return new_total_prufer_right, final_right_angle
 
 
-def Step_Prufer_Right_Backward(baked_mesh, logical_index, right_index, global_scaling_factor, current_prufer_right, current_right_shot_vector, next_right_shot_vector):
 
+def Step_Prufer_Right_Backward(baked_mesh, current_prufer_right, prev_intra_loop_angle_right, logical_index, right_index, global_scaling_factor, current_right_shot_vector, next_right_shot_vector):
     local_scaling_factor = baked_mesh["local_scaling_factor_right_mesh"][logical_index]
     if local_scaling_factor=="Barrier Case!": #barrier case: E<=V
-        raw_end_theta = math.atan(global_scaling_factor*(next_right_shot_vector[0]/next_right_shot_vector[1]))
+        raw_end_theta = math.atan2(global_scaling_factor*next_right_shot_vector[0], next_right_shot_vector[1])
+        prufer_right_global = math.atan2(global_scaling_factor*next_right_shot_vector[0], next_right_shot_vector[1])
         if (current_right_shot_vector[0] == 0 or next_right_shot_vector[0] == 0) or (current_right_shot_vector[0] > 0 and next_right_shot_vector[0] > 0) or (current_right_shot_vector[0] < 0 and next_right_shot_vector[0] < 0):
-            if current_prufer_right > 0 and raw_end_theta < 0:
-                return raw_end_theta + math.pi
-            elif current_prufer_right < 0 and raw_end_theta > 0:
-                return raw_end_theta - math.pi
+            if prufer_right_global > 0 and raw_end_theta < 0:
+                final_left_angle = raw_end_theta + math.pi
+            elif prufer_right_global < 0 and raw_end_theta > 0:
+                final_left_angle = raw_end_theta - math.pi
             else:
-                return raw_end_theta
+                final_left_angle = raw_end_theta
         else:
-            if (current_prufer_right > 0 and raw_end_theta > 0) or (current_prufer_right < 0 and raw_end_theta < 0):
-                return raw_end_theta + math.pi
+            if (prufer_right_global > 0 and raw_end_theta > 0) or (prufer_right_global < 0 and raw_end_theta < 0):
+                final_left_angle = raw_end_theta + math.pi
             else:
-                return raw_end_theta
+                final_left_angle = raw_end_theta
+
+        new_total_prufer_left = Constricted_Looping_Monotone_Angle_To_Total_Monotone_Angle(current_prufer_right, final_left_angle, prev_intra_loop_angle_right, direction="down")
+        return new_total_prufer_left, final_left_angle
+
     else: #well case: E>V
-        linear_unadjusted_left_angle = -local_scaling_factor * baked_mesh["delta_forward_mesh"][logical_index] + math.atan(local_scaling_factor*(current_right_shot_vector[0]/current_right_shot_vector[1]))
-        end_constant_corrector = math.atan(local_scaling_factor*(next_right_shot_vector[0]/next_right_shot_vector[1]))
-        predicted_linear_phase = linear_unadjusted_left_angle%math.pi
+        linear_unadjusted_left_angle = -local_scaling_factor * baked_mesh["delta_forward_mesh"][logical_index] + math.atan2(local_scaling_factor*current_right_shot_vector[0], current_right_shot_vector[1])
+        end_constant_corrector = math.atan2(local_scaling_factor*next_right_shot_vector[0], next_right_shot_vector[1])
+
+        integer_part_determiner = linear_unadjusted_left_angle/math.pi
+        if abs(integer_part_determiner)%1 < AD_HOC_INT_BUFFERER and int(integer_part_determiner)!=0:
+            if int(integer_part_determiner) > 0:
+                integer_part = int(integer_part_determiner) - 1
+            elif int(integer_part_determiner) < 0:
+                integer_part = int(integer_part_determiner) + 1
+        else:
+            integer_part = int(integer_part_determiner)
+
+        predicted_linear_phase = linear_unadjusted_left_angle #- integer_part*math.pi #NOTE: VERY VERY IMPORTANT TO USE INT! here's why: if it's say -.01, using mod or math.floor or native double slash "//" floor division will spit out -1 i.e. greastest integer less than the value, whereas int takes biggest integer smaller than the value and then puts in the right sign (or something like that). ledoux doesn't make it clear that the "integer part" means that, but in context (and practice) it's clearly what she meant.
         phase_correction = end_constant_corrector - predicted_linear_phase
+        #print(f"phase_correction raw: {phase_correction}")
+
         if phase_correction < -math.pi/2:
-            phase_correction += math.pi
-        elif phase_correction > math.pi/2: #ledoux has a case for this, i don't actually see how it's possible.
-            print(f"phase_correction > math.pi/2, {phase_correction}, {end_constant_corrector}, {predicted_linear_phase}, {local_scaling_factor}")
-            phase_correction -= math.pi
+            range_canonicalization_corrector = math.pi
+        elif phase_correction > math.pi/2:
+            #print(f"phase_correction > math.pi/2, {phase_correction}, {end_constant_corrector}, {predicted_linear_phase}, {local_scaling_factor}")
+            range_canonicalization_corrector = -math.pi
+        else:
+            range_canonicalization_corrector = 0
 
-        final_unadjusted_left_angle = linear_unadjusted_left_angle + phase_correction
+        if abs(phase_correction + range_canonicalization_corrector) > .01:
+            #input('ahh')
+            pass
+
+
+        #print(f"var integer_part: {integer_part}")
+        #print(f"the thing: {linear_unadjusted_left_angle/math.pi}")
+
+        final_unadjusted_left_angle = linear_unadjusted_left_angle + phase_correction + range_canonicalization_corrector
         final_left_angle = Adjust_Prufer_Angle(final_unadjusted_left_angle, global_scaling_factor/local_scaling_factor)
-        return final_left_angle
+        #print(f"final_left: {final_left_angle}")
+        new_total_prufer_left = Constricted_Looping_Monotone_Angle_To_Total_Monotone_Angle(current_prufer_right, final_left_angle, prev_intra_loop_angle_right, direction="down")
+
+        return new_total_prufer_left, final_left_angle
 
 
-def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vector, lambda_, indep_var_mesh_key="mesh", matching_point_index=None, disable_delta_forward_baking_pbar=True, disable_prop_baking_pbar=True, disable_shooting_pbar=False): #takes in the prop_mats for a schrodinger problem and the full_shot_vector is the initial shot at both endpoints giving left then right in a single vector. baked_mesh has a bunch of information, including the mesh itself, and is a dictionary so that i don't forget what the things are. #!!!stubby top down code this stuff.
+def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vector, lambda_, indep_var_mesh_key="mesh", matching_point_index=None, disable_delta_forward_baking_pbar=True, disable_prop_baking_pbar=True, disable_shooting_pbar=False, disable_local_scaling_factors_baking_pbar=True): #takes in the prop_mats for a schrodinger problem and the full_shot_vector is the initial shot at both endpoints giving left then right in a single vector. baked_mesh has a bunch of information, including the mesh itself, and is a dictionary so that i don't forget what the things are. #!!!stubby top down code this stuff.
     #!!!implement energy derivative tracking for newton's method
     #!!!see if newton's method is actually more practical than bisection here
     if "delta_forward_mesh" not in baked_mesh.keys():
@@ -564,32 +644,39 @@ def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vecto
         global_scaling_factor = (global_scaling_factor_determiner)**.5
     else:
         print(f"what? not greater or less than or equal to 1. {global_scaling_factor_determiner}")
+        print(f"what follow up: {lambda_}, {baked_mesh['potential_mesh'][matching_point_index]}")
 
-    Bake_Local_Scaling_Factors(baked_mesh, global_scaling_factor, lambda_, indep_var_mesh_key=indep_var_mesh_key, matching_point_index=matching_point_index, disable_pbar=False)#!!!disable
+    Bake_Local_Scaling_Factors(baked_mesh, global_scaling_factor, lambda_, indep_var_mesh_key=indep_var_mesh_key, matching_point_index=matching_point_index, disable_pbar=disable_local_scaling_factors_baking_pbar)
 
 
     Bake_Prop_Mats(baked_mesh, lambda_, indep_var_mesh_key=indep_var_mesh_key, matching_point_index=matching_point_index, disable_pbar=disable_prop_baking_pbar)
     current_left_shot_vector, current_right_shot_vector = np.copy(left_shot_vector), np.copy(right_shot_vector)
     prufer_boundary_conditions = original_boundary_conditions_to_prufer_shooters(lambda x: 1, baked_mesh[indep_var_mesh_key][0], *left_shot_vector, baked_mesh[indep_var_mesh_key][-1], *right_shot_vector)
     current_prufer_left, current_prufer_right = prufer_boundary_conditions[0][1], prufer_boundary_conditions[1][1]
-
+    #print(current_prufer_left, current_prufer_right)
     left_index = 0
     right_index = len(baked_mesh[indep_var_mesh_key])-1
     logical_index = 0
+    prev_looping_angle_left = 0
+    prev_looping_angle_right = 0
     if not disable_shooting_pbar:
         print("Shooting...")
     with tqdm(total=max(matching_point_index-left_index, right_index-matching_point_index), disable=disable_shooting_pbar) as pbar:
         while left_index < matching_point_index and right_index > matching_point_index:
+            #print('prufers:',end='')
+            #print(current_prufer_left, current_prufer_right) #!!!probably sign error
+
             if left_index < matching_point_index:
                 next_left_shot_vector = np.dot(baked_mesh["prop_mat_forward_mesh"][logical_index], current_left_shot_vector)
-                next_prufer_left = Step_Prufer_Left_Forward(baked_mesh, left_index, global_scaling_factor, current_prufer_left, current_left_shot_vector, next_left_shot_vector)
+                #print(Step_Prufer_Left_Forward(baked_mesh, current_prufer_left, prev_looping_angle_left, left_index, global_scaling_factor, current_left_shot_vector, next_left_shot_vector))
+                next_prufer_left, prev_looping_angle_left = Step_Prufer_Left_Forward(baked_mesh, current_prufer_left, prev_looping_angle_left, left_index, global_scaling_factor, current_left_shot_vector, next_left_shot_vector)
 
                 current_left_shot_vector = next_left_shot_vector
                 current_prufer_left = next_prufer_left
 
             if right_index > matching_point_index:
                 next_right_shot_vector = np.dot(baked_mesh["prop_mat_backward_mesh"][logical_index], current_right_shot_vector)
-                next_prufer_right = Step_Prufer_Right_Backward(baked_mesh, logical_index, right_index, global_scaling_factor, current_prufer_right, current_right_shot_vector, next_right_shot_vector)
+                next_prufer_right, prev_looping_angle_right = Step_Prufer_Right_Backward(baked_mesh, current_prufer_right, prev_looping_angle_right, logical_index, right_index, global_scaling_factor, current_right_shot_vector, next_right_shot_vector)
 
                 current_right_shot_vector = next_right_shot_vector
                 current_prufer_right = next_prufer_right
@@ -601,11 +688,14 @@ def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vecto
 
 
     mismatch =  current_left_shot_vector[1]*current_right_shot_vector[0] - current_right_shot_vector[1]*current_left_shot_vector[0]
-    theta_diff = current_prufer_left - current_prufer_right
-    print('bla')
-    print(current_prufer_left, current_prufer_right) #!!!probably sign error
-    eigen_index = theta_diff/math.pi #!!!this gives wrong values
-    return mismatch, eigen_index #!!!all of the prufer code is untested
+
+    final_left_prufer = current_prufer_left
+    final_right_prufer = current_prufer_right
+    theta_diff = final_left_prufer - final_right_prufer
+    #print(f'diffs: {final_left_prufer} and {final_right_prufer}')
+    #print(f'ending prufs shots: {final_left_prufer}, {final_right_prufer}')
+    eigen_index = theta_diff/(4*math.pi)
+    return mismatch, eigen_index
 #correct for: mathieu with k_0=1 e_0=5, magnetic, coffey-evans with beta=20 as long as you make very close initial guesses,
 
 '''
@@ -675,7 +765,7 @@ def Make_Smart_Find_X_Given_R(Q_Integrand, double_coordinate_mesh):
         lower_contained_indice = find_contained_interval(requested_r, double_coordinate_mesh["r_mesh"])
         return double_coordinate_mesh["x_mesh"][lower_contained_indice] + Custom_Liouville_Integration(Q_Integrand, double_coordinate_mesh["r_mesh"][lower_contained_indice], requested_r)
     return r_to_x
-def Make_Smart_Find_R_Given_X(Q_Integrand, double_coordinate_mesh, tol=.001):
+def Make_Smart_Find_R_Given_X(Q_Integrand, double_coordinate_mesh, tol=.001): #!!!make this changeable in other funcs
     def x_to_r(requested_x):
         lower_contained_indice = find_contained_interval(requested_x, double_coordinate_mesh["x_mesh"])
         func_with_zero_at_the_right_r_val = lambda r: Custom_Liouville_Integration(Q_Integrand, double_coordinate_mesh["r_mesh"][lower_contained_indice], r) - requested_x + double_coordinate_mesh["x_mesh"][lower_contained_indice]
@@ -684,27 +774,57 @@ def Make_Smart_Find_R_Given_X(Q_Integrand, double_coordinate_mesh, tol=.001):
     return x_to_r
 
 def Make_Liouville_Sigma_Given_R(p_of_r, w_of_r):
-    return lambda r: (p_of_r(r) * w_of_r(r)) ** (-.25)
+    return lambda r: bool(print(f"p, q: {p_of_r(r)}, {w_of_r(r)}")) + (p_of_r(r) * w_of_r(r)) ** (-.25)
 
-def Make_Potential_Of_X_Given_R_of_X(q_of_r, w_of_r, sigma_of_r, r_of_x, dx=.01): #all the sources have this, but the only one that actually makes it clear what the equation means is J.D. Pryce's book Numerical Solution of Sturm Liouville Problems, and it really looks like everyone else copied the specific equation from Pyrce while forgetting to copy the explanatory note.
-    def pot_of_x(x):
-        r = r_of_x(x)
-        return q_of_r(r)/w_of_r(r) + sigma_of_r(r) * NumD(NumD(lambda r: 1/sigma_of_r(r), dx, cmp_step=False), dx, cmp_step=False)(x)
+def Bake_Sigma(sigma_of_r, double_coordinate_mesh, r_var_name="r_mesh"):
+    double_coordinate_mesh["sigma_mesh"] = []
+    for r_indice in range(len(double_coordinate_mesh[r_var_name])):
+        double_coordinate_mesh["sigma_mesh"].append(sigma_of_r(double_coordinate_mesh[r_var_name][r_indice]))
+    return
+
+def Find_Sigma_2nd_Deriv_At_A_Good_Indice(baked_mesh, q_of_r, w_of_r, indice, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh"):
+    r = baked_mesh[r_var_mesh_name][indice]
+    x = baked_mesh[x_var_mesh_name][indice]
+    sigma_of_r = baked_mesh["sigma_mesh"][indice]
+    x_b1 = baked_mesh[x_var_mesh_name][indice-1]
+    sigma_bd1 = baked_mesh["sigma_mesh"][indice] - baked_mesh["sigma_mesh"][indice-1]
+    sigma_deriv_x_b1 = (sigma_bd1)/(x-x_b1)
+
+    x_f1 = baked_mesh[x_var_mesh_name][indice+1]
+    sigma_fd1 = baked_mesh["sigma_mesh"][indice+1] - baked_mesh["sigma_mesh"][indice]
+    sigma_deriv_x_f1 = (sigma_fd1)/(x_f1-x)
+    sigma_2nd_deriv_x = (sigma_deriv_x_f1 - sigma_deriv_x_b1)/( (x_f1-x)/2 - (x_b1-x)/2 )
+    return q_of_r(r)/w_of_r(r) + sigma_of_r * sigma_2nd_deriv_x
+
+def Make_Potential_At_An_Indice(q_of_r, w_of_r, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh", dx=.001): #all the sources have this, but the only one that actually makes it clear what the equation means is J.D. Pryce's book Numerical Solution of Sturm Liouville Problems, and it really looks like everyone else copied the specific equation from Pyrce while forgetting to copy the explanatory note.
+    def pot_of_x(baked_mesh, indice):
+        original_r = baked_mesh[r_var_mesh_name][indice]
+        if indice > 0 and indice < len(baked_mesh[x_var_mesh_name]) - 1:
+            sigma_2nd_deriv_x = Find_Sigma_2nd_Deriv_At_A_Good_Indice(baked_mesh, q_of_r, w_of_r, indice, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh")
+
+        elif indice == 0: #assume quadratic so use 2nd deriv of nearby point
+            sigma_2nd_deriv_x = Find_Sigma_2nd_Deriv_At_A_Good_Indice(baked_mesh, q_of_r, w_of_r, indice+1, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh")
+
+        elif indice == len(baked_mesh[x_var_mesh_name]) - 1:
+            sigma_2nd_deriv_x = Find_Sigma_2nd_Deriv_At_A_Good_Indice(baked_mesh, q_of_r, w_of_r, indice-1, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh")
+
+        return q_of_r(original_r)/w_of_r(original_r) + baked_mesh["sigma_mesh"][indice] * sigma_2nd_deriv_x
+
     return pot_of_x
 
-def Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p_of_r, q_of_r, w_of_r, r_mesh, dx=.01):
+def Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p_of_r, q_of_r, w_of_r, r_mesh, dx=.001):
     Q_Integrand = Make_Liouville_Q_Integrand(p_of_r, w_of_r)
     double_coordinate_mesh = Dumb_Double_Mesh_Make(Q_Integrand, r_mesh)
     sigma_of_r = Make_Liouville_Sigma_Given_R(p_of_r, w_of_r)
-    r_of_x = Make_Smart_Find_R_Given_X(Q_Integrand, double_coordinate_mesh)
-    pot = Make_Potential_Of_X_Given_R_of_X(q_of_r, w_of_r, sigma_of_r, r_of_x, dx=dx)
+    Bake_Sigma(sigma_of_r, double_coordinate_mesh)
+    pot = Make_Potential_At_An_Indice(q_of_r, w_of_r, dx=dx)
     bake_potentials_into_mesh(pot, double_coordinate_mesh, indep_var_mesh_key="x_mesh")
     return double_coordinate_mesh
 
-def CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=.01, disable_shooting_pbar=True):
+def CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=.001, disable_shooting_pbar=True, disable_local_scaling_factors_baking_pbar=True):
     pot_of_x_baked_double_coordinate_mesh = Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p_of_r, q_of_r, w_of_r, r_mesh, dx=dx)
     #r_mesh is now a double_coordinate_mesh baked with potentials
-    mis = lambda lambda_: CPM_Method_Shoot_And_Mismatch(pot_of_x_baked_double_coordinate_mesh, init_left_shot_vector, init_right_shot_vector, lambda_, indep_var_mesh_key="x_mesh", matching_point_index=None, disable_delta_forward_baking_pbar=True, disable_prop_baking_pbar=True, disable_shooting_pbar=True)
+    mis = lambda lambda_: CPM_Method_Shoot_And_Mismatch(pot_of_x_baked_double_coordinate_mesh, init_left_shot_vector, init_right_shot_vector, lambda_, indep_var_mesh_key="x_mesh", matching_point_index=None, disable_delta_forward_baking_pbar=True, disable_prop_baking_pbar=True, disable_shooting_pbar=disable_shooting_pbar, disable_local_scaling_factors_baking_pbar=disable_local_scaling_factors_baking_pbar)
     return pot_of_x_baked_double_coordinate_mesh, mis
 #works for azimuthal (magnetic quantum numbers), polar (azimuthal quantum numbers), radial?
 
@@ -975,30 +1095,36 @@ while True:
 
 
 
-
+'''
 #cpm tests
 #azimuthal equation (magnetic quantum numbers)
 p_of_r, q_of_r, w_of_r = lambda x: 1, lambda x: 0, lambda x: 1
 mesh_dr = .01
+newton_tol = .001
 r_mesh = np.arange(0, 2*math.pi, mesh_dr)
 init_left_shot_vector, init_right_shot_vector = [0,1], [0,1]
 baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=.01)
-while True:
-    guess = float(input("guess: "))
-    print(Secant_Method(mis_eigen, guess, guess+.01, .01, f_index_to_rootfind=0))
+#while True:
+#    guess = float(input("guess: "))
+#    print(Secant_Method(mis_eigen, guess, guess+.01, newton_tol, f_index_to_rootfind=0))
+generic_plot(np.arange(-1,27,.1),lambda l: mis_eigen(l)[1])
+'''
 
-''' polar (azimuthal quantum numbers) equation
-m=3
+#polar (azimuthal quantum numbers) equation
+m=5
 p_of_r, q_of_r, w_of_r = lambda x: math.sin(x), lambda x: m**2/math.sin(x), lambda x: math.sin(x)
 boundary_epsilon = .01
 mesh_dr = .01
+newton_tol=.01
 r_mesh = np.arange(boundary_epsilon, math.pi-boundary_epsilon, mesh_dr)
 init_left_shot_vector, init_right_shot_vector = [0,1], [0,1]
-mis = CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=.01)
+baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=.01)
+'''
 while True:
     guess = float(input("guess: "))
-    print(Secant_Method(mis, guess, guess+.01, .01))
+    print(Secant_Method(mis_eigen, guess, guess+.01, newton_tol, f_index_to_rootfind=0))
 '''
+generic_plot(np.arange(-1,27,.1),lambda l: mis_eigen(l)[0])
 
 '''
 #radial
