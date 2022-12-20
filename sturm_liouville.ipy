@@ -13,6 +13,8 @@ from warnings import warn
 import pyqtgraph as pg
 import PyQt5
 DashLine = PyQt5.QtCore.Qt.DashLine #doing this as a from import doesn't work for unknown reasons.
+import datetime
+
 import IPython
 #start the qt5 event loop
 %gui qt5
@@ -70,8 +72,8 @@ def Secant_Method(f, x_0, x_1, tolerance, f_index_to_rootfind=False, low_deriv_w
         while abs(thisF) >= tolerance:
             dx = x_n1-x_n0
             df = thisF-prevF
-            print(f"secant debugging: {thisF}, {dx}, {df}")
-            print(f"secant deriv: {df/dx}")
+            #print(f"secant debugging: {thisF}, {dx}, {df}")
+            #print(f"secant deriv: {df/dx}")
             derivative = df/dx
             if abs(derivative) < low_deriv_warning_thresh and not low_deriv_warning_fired: #don't warn if already warned in this run of the method
                 warn("Derivative is smaller than warning threshold! Catastrophe may ensue!")
@@ -774,7 +776,7 @@ def Make_Smart_Find_R_Given_X(Q_Integrand, double_coordinate_mesh, tol=.001): #!
     return x_to_r
 
 def Make_Liouville_Sigma_Given_R(p_of_r, w_of_r):
-    return lambda r: bool(print(f"p, q: {p_of_r(r)}, {w_of_r(r)}")) + (p_of_r(r) * w_of_r(r)) ** (-.25)
+    return lambda r: (p_of_r(r) * w_of_r(r)) ** (-.25)
 
 def Bake_Sigma(sigma_of_r, double_coordinate_mesh, r_var_name="r_mesh"):
     double_coordinate_mesh["sigma_mesh"] = []
@@ -782,34 +784,39 @@ def Bake_Sigma(sigma_of_r, double_coordinate_mesh, r_var_name="r_mesh"):
         double_coordinate_mesh["sigma_mesh"].append(sigma_of_r(double_coordinate_mesh[r_var_name][r_indice]))
     return
 
-def Find_Sigma_2nd_Deriv_At_A_Good_Indice(baked_mesh, q_of_r, w_of_r, indice, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh"):
+def Find_Reciprocal_Sigma_2nd_Deriv_At_A_Good_Indice(baked_mesh, q_of_r, w_of_r, indice, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh"):
     r = baked_mesh[r_var_mesh_name][indice]
     x = baked_mesh[x_var_mesh_name][indice]
-    sigma_of_r = baked_mesh["sigma_mesh"][indice]
+    recip_sigma_of_r = 1/baked_mesh["sigma_mesh"][indice]
     x_b1 = baked_mesh[x_var_mesh_name][indice-1]
-    sigma_bd1 = baked_mesh["sigma_mesh"][indice] - baked_mesh["sigma_mesh"][indice-1]
-    sigma_deriv_x_b1 = (sigma_bd1)/(x-x_b1)
+    recip_sigma_bd1 = recip_sigma_of_r - 1/baked_mesh["sigma_mesh"][indice-1]
+    recip_sigma_deriv_x_b1 = (recip_sigma_bd1)/(x-x_b1)
 
     x_f1 = baked_mesh[x_var_mesh_name][indice+1]
-    sigma_fd1 = baked_mesh["sigma_mesh"][indice+1] - baked_mesh["sigma_mesh"][indice]
-    sigma_deriv_x_f1 = (sigma_fd1)/(x_f1-x)
-    sigma_2nd_deriv_x = (sigma_deriv_x_f1 - sigma_deriv_x_b1)/( (x_f1-x)/2 - (x_b1-x)/2 )
-    return q_of_r(r)/w_of_r(r) + sigma_of_r * sigma_2nd_deriv_x
+    recip_sigma_fd1 = 1/baked_mesh["sigma_mesh"][indice+1] - recip_sigma_of_r
+    recip_sigma_deriv_x_f1 = (recip_sigma_fd1)/(x_f1-x)
+    recip_sigma_2nd_deriv_x = (recip_sigma_deriv_x_f1 - recip_sigma_deriv_x_b1)/( (x_f1-x)/2 - (x_b1-x)/2 )
+    return recip_sigma_2nd_deriv_x
 
-def Make_Potential_At_An_Indice(q_of_r, w_of_r, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh", dx=.001): #all the sources have this, but the only one that actually makes it clear what the equation means is J.D. Pryce's book Numerical Solution of Sturm Liouville Problems, and it really looks like everyone else copied the specific equation from Pyrce while forgetting to copy the explanatory note.
-    def pot_of_x(baked_mesh, indice):
-        original_r = baked_mesh[r_var_mesh_name][indice]
-        if indice > 0 and indice < len(baked_mesh[x_var_mesh_name]) - 1:
-            sigma_2nd_deriv_x = Find_Sigma_2nd_Deriv_At_A_Good_Indice(baked_mesh, q_of_r, w_of_r, indice, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh")
+def Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=None, backup_x_of_r=None, backup_r_of_x=None, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh", dx=.001): #all the sources have this, but the only one that actually makes it clear what the equation means is J.D. Pryce's book Numerical Solution of Sturm Liouville Problems, and it really looks like everyone else copied the specific equation from Pyrce while forgetting to copy the explanatory note.
+    if backup_sigma is None:
+        def pot_of_x(baked_mesh, indice):
+            original_r = baked_mesh[r_var_mesh_name][indice]
+            if indice > 0 and indice < len(baked_mesh[x_var_mesh_name]) - 1:
+                recip_sigma_2nd_deriv_x = Find_Reciprocal_Sigma_2nd_Deriv_At_A_Good_Indice(baked_mesh, q_of_r, w_of_r, indice, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh")
 
-        elif indice == 0: #assume quadratic so use 2nd deriv of nearby point
-            sigma_2nd_deriv_x = Find_Sigma_2nd_Deriv_At_A_Good_Indice(baked_mesh, q_of_r, w_of_r, indice+1, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh")
+            elif indice == 0: #assume quadratic so use 2nd deriv of nearby point
+                recip_sigma_2nd_deriv_x = Find_Reciprocal_Sigma_2nd_Deriv_At_A_Good_Indice(baked_mesh, q_of_r, w_of_r, indice+1, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh")
 
-        elif indice == len(baked_mesh[x_var_mesh_name]) - 1:
-            sigma_2nd_deriv_x = Find_Sigma_2nd_Deriv_At_A_Good_Indice(baked_mesh, q_of_r, w_of_r, indice-1, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh")
+            elif indice == len(baked_mesh[x_var_mesh_name]) - 1:
+                recip_sigma_2nd_deriv_x = Find_Reciprocal_Sigma_2nd_Deriv_At_A_Good_Indice(baked_mesh, q_of_r, w_of_r, indice-1, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh")
 
-        return q_of_r(original_r)/w_of_r(original_r) + baked_mesh["sigma_mesh"][indice] * sigma_2nd_deriv_x
-
+            return q_of_r(original_r)/w_of_r(original_r) + baked_mesh["sigma_mesh"][indice] * recip_sigma_2nd_deriv_x
+    else:
+        def pot_of_x(baked_mesh, indice):
+            r = backup_r_of_x(baked_mesh[x_var_mesh_name][indice])
+            #return q_of_r(r)/w_of_r(r) + backup_sigma(r) * NumD(NumD(lambda x: 1/backup_sigma(backup_r_of_x(x)), dx, cmp_step=False), dx, cmp_step=False)(backup_x_of_r(r))
+            return q_of_r(r)/w_of_r(r) + backup_sigma(r) * NumD(NumD(lambda x: 1/backup_sigma(x), dx, cmp_step=False), dx, cmp_step=False)(baked_mesh[x_var_mesh_name][indice])
     return pot_of_x
 
 def Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p_of_r, q_of_r, w_of_r, r_mesh, dx=.001):
@@ -817,7 +824,10 @@ def Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p
     double_coordinate_mesh = Dumb_Double_Mesh_Make(Q_Integrand, r_mesh)
     sigma_of_r = Make_Liouville_Sigma_Given_R(p_of_r, w_of_r)
     Bake_Sigma(sigma_of_r, double_coordinate_mesh)
-    pot = Make_Potential_At_An_Indice(q_of_r, w_of_r, dx=dx)
+    r_of_x = Make_Smart_Find_R_Given_X(Q_Integrand, double_coordinate_mesh)
+    x_of_r = Make_Smart_Find_X_Given_R(Q_Integrand, double_coordinate_mesh)
+    #backup_sigma=sigma_of_r, backup_x_of_r=x_of_r, backup_r_of_x=r_of_x
+    pot = Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=sigma_of_r, backup_x_of_r=x_of_r, backup_r_of_x=r_of_x, dx=dx)
     bake_potentials_into_mesh(pot, double_coordinate_mesh, indep_var_mesh_key="x_mesh")
     return double_coordinate_mesh
 
@@ -895,7 +905,9 @@ def particular_spanning_solutions_to_general(y_1, y_2, dx): #!!!use this
 
 
 
-def generic_plot(x_vals, func, disable_pbar=False):
+def generic_plot(x_vals, func, disable_pbar=False, title=None):
+    if title is None:
+        title = str(datetime.datetime.today())
     print("Calculating func values to plot...")
     y_vals = [func(x_val) for x_val in tqdm(x_vals, disable=disable_pbar)]
 
@@ -906,6 +918,7 @@ def generic_plot(x_vals, func, disable_pbar=False):
     pw = pg.plot(x_vals, y_vals, pen='r') #this is the plot widget
     origin_x_axis = pg.InfiniteLine(0, 0, pen={'color':'b', 'style':DashLine})
     pi = pw.getPlotItem()
+    pi.setTitle(title)
     vb = pi.getViewBox()
     vb.setYRange(*y_range)
     vb.addItem(origin_x_axis)
@@ -985,11 +998,6 @@ def plot_eigen_funcs(list_of_list_of_coords, eigen_vals, color_eigen_as_zero_pre
 
 
 #prufer tests
-'''
-dx = .001
-tolerance = .01
-up_to_n_eigens = 3
-'''
 
 '''
 #azimuth (magnetic quantum number) #!!!try this with wronsk = [1, 1j] and [-1j, 1] or similar [sols are complex for this equation]
@@ -1020,7 +1028,7 @@ hbar = constants.hbar
 
 
 l = 1
-boundary_epsilon = .001
+boundary_epsilon = .01
 boundary_inf_approx = 100
 #p,q,w = lambda x: x**2, lambda x: l*(l+1) - ((2*reduced_mass)*(x**2)/(hbar**2)) * ((electron_charge**2)/(4*math.pi*vaccuum_permittivity*x)), lambda x: ((2*reduced_mass)*(x**2)/(hbar**2))
 coulomb_z = 1/2
@@ -1062,6 +1070,10 @@ plot_many_funcs(list_of_x_vals, np.vectorize(displacement_newton_param_by_i)(i_l
 
 
 '''
+dx = .001
+tolerance = .01
+up_to_n_eigens = 3
+
 prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
 #generic_plot(np.arange(-10,20,.1), prufer_mismatch)
 eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)))[:,0].round(5)
@@ -1095,8 +1107,9 @@ while True:
 
 
 
-'''
+
 #cpm tests
+'''
 #azimuthal equation (magnetic quantum numbers)
 p_of_r, q_of_r, w_of_r = lambda x: 1, lambda x: 0, lambda x: 1
 mesh_dr = .01
@@ -1110,23 +1123,34 @@ baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_
 generic_plot(np.arange(-1,27,.1),lambda l: mis_eigen(l)[1])
 '''
 
-#polar (azimuthal quantum numbers) equation
-m=5
-p_of_r, q_of_r, w_of_r = lambda x: math.sin(x), lambda x: m**2/math.sin(x), lambda x: math.sin(x)
-boundary_epsilon = .01
-mesh_dr = .01
-newton_tol=.01
-r_mesh = np.arange(boundary_epsilon, math.pi-boundary_epsilon, mesh_dr)
-init_left_shot_vector, init_right_shot_vector = [0,1], [0,1]
-baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=.01)
-'''
-while True:
-    guess = float(input("guess: "))
-    print(Secant_Method(mis_eigen, guess, guess+.01, newton_tol, f_index_to_rootfind=0))
-'''
-generic_plot(np.arange(-1,27,.1),lambda l: mis_eigen(l)[0])
 
+#polar (azimuthal quantum numbers) equation
 '''
+m=3
+p_of_r, q_of_r, w_of_r = lambda x: math.sin(x), lambda x: m**2/math.sin(x), lambda x: math.sin(x)
+
+boundary_epsilon = .001
+
+mesh_dr_left = .001
+
+mesh_r_mid_left = .2
+mesh_dr_mid = .01
+mesh_r_mid_right = .8
+
+mesh_dr_end = .001
+
+newton_tol=.001
+r_mesh = np.concatenate(np.array([np.arange(boundary_epsilon, mesh_r_mid_left, mesh_dr_left), np.arange(mesh_r_mid_left, mesh_r_mid_right, mesh_dr_mid), np.arange(mesh_r_mid_right, math.pi-boundary_epsilon, mesh_dr_end)], dtype=object))
+init_left_shot_vector_0, init_right_shot_vector_0 = [0,1], [0,1]
+baked_mesh_0, mis_eigen_0 = CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector_0, init_right_shot_vector_0, dx=.01)
+#while True:
+    #guess = float(input("guess: "))
+    #print(Secant_Method(mis_eigen, guess, guess+.01, newton_tol, f_index_to_rootfind=0))
+
+generic_plot(np.arange(-1,27,.1),lambda l: mis_eigen_0(l)[0])
+'''
+
+
 #radial
 electron_mass, proton_mass = constants.electron_mass, constants.proton_mass
 reduced_mass = electron_mass*proton_mass/(electron_mass+proton_mass)
@@ -1135,13 +1159,13 @@ vaccuum_permittivity = constants.epsilon_0
 hbar = constants.hbar
 
 l = 1
-boundary_epsilon = .0001
+boundary_epsilon = .001
 mid_r_start = 1
 mid_r_end = 10
 boundary_inf_approx = 100
 coulomb_z = 1/2
 p_of_r,q_of_r,w_of_r = lambda x: 1, lambda x: l*(l+1)/(x**2) - (2*coulomb_z)/(x), lambda x: 1
-mesh_dr_start = .0001
+mesh_dr_start = .001
 mesh_dr_mid = .01
 mesh_dr_end = 1
 r_mesh_start = np.arange(boundary_epsilon, mid_r_start, mesh_dr_start)
@@ -1150,10 +1174,10 @@ r_mesh_end = np.arange(mid_r_end, boundary_inf_approx, mesh_dr_end)
 r_mesh = np.concatenate([r_mesh_start, r_mesh_mid, r_mesh_end])
 init_left_shot_vector, init_right_shot_vector = [0,1], [0,1]
 Num_D_Liouville_dx = .001
-mis = CPM_Method_Liouville_Mismatch(p_of_r,q_of_r,w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=Num_D_Liouville_dx, disable_shooting_pbar=True)
+baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r,q_of_r,w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=Num_D_Liouville_dx, disable_shooting_pbar=True)
 print("plotting")
-generic_plot(np.arange(-.1,.1,.0001),mis)
-'''
+generic_plot(np.arange(-.1,0,.001), lambda e: mis_eigen(e)[0])
+
 
 '''
 while True:
