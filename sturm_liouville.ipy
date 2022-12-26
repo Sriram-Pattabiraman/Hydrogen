@@ -490,23 +490,27 @@ def Bake_Local_Scaling_Factors(baked_mesh, global_scaling_factor, lambda_, indep
 def Adjust_Prufer_Angle(unadjusted_angle, rescaling_ratio): #rescaling ratio is new_scale/old_scale, and is denoted in many sources (pyrce, ledoux) as "\sigma", not to be confused with the unrelated "\sigma" used in the Liouville transformation.
     return unadjusted_angle + math.atan2((rescaling_ratio-1)*math.sin(rescaling_ratio)*math.cos(rescaling_ratio), 1 + (rescaling_ratio - 1) * (math.sin(rescaling_ratio)**2))
 
-def Constricted_Looping_Monotone_Angle_To_Total_Monotone_Angle(current_total_monotone_angle, constricted_looping_monotone_angle, prev_constricted_looping_monotone_angle, direction="up"): #constricted_looping_monotone_angle constricted between -\pi, \pi, monotone increasing but loops
+DEFAULT_AD_HOC_PI_FACTOR = .9
+def Constricted_Looping_Monotone_Angle_To_Total_Monotone_Angle(current_total_monotone_angle, constricted_looping_monotone_angle, prev_constricted_looping_monotone_angle, adhoc_not_jump_threshold=DEFAULT_AD_HOC_PI_FACTOR*math.pi, direction="up"): #constricted_looping_monotone_angle constricted between -\pi, \pi, monotone increasing but loops
     intra_loop_angle_delta = constricted_looping_monotone_angle - prev_constricted_looping_monotone_angle
+    if abs(intra_loop_angle_delta) < adhoc_not_jump_threshold:
+        current_total_monotone_angle += intra_loop_angle_delta
+        return current_total_monotone_angle
+
     if direction=="up":
         if intra_loop_angle_delta < 0:
-            current_total_monotone_angle += 2*math.pi + intra_loop_angle_delta
+            current_total_monotone_angle += math.pi + intra_loop_angle_delta
         else:
             current_total_monotone_angle += intra_loop_angle_delta
     elif direction=="down":
         if intra_loop_angle_delta > 0:
-            current_total_monotone_angle += -2*math.pi + intra_loop_angle_delta
+            current_total_monotone_angle += -math.pi + intra_loop_angle_delta
         else:
             current_total_monotone_angle += intra_loop_angle_delta
 
     return current_total_monotone_angle
 
 
-AD_HOC_INT_BUFFERER = .1 #!!!wrong, perhaps remove?
 def Step_Prufer_Left_Forward(baked_mesh, current_prufer_left, prev_intra_loop_angle_left, left_index, global_scaling_factor, current_left_shot_vector, next_left_shot_vector):
     local_scaling_factor = baked_mesh["local_scaling_factor_left_mesh"][left_index]
     if local_scaling_factor=="Barrier Case!": #barrier case: E<=V
@@ -532,16 +536,9 @@ def Step_Prufer_Left_Forward(baked_mesh, current_prufer_left, prev_intra_loop_an
         #ledoux uses "atan", but it should be "atan2" - this is probably just her forgetting to clarify or assuming the reader implicitly understood that fact.
         linear_unadjusted_right_angle = local_scaling_factor * baked_mesh["delta_forward_mesh"][left_index] + math.atan2(local_scaling_factor*current_left_shot_vector[0], current_left_shot_vector[1])
         end_constant_corrector = math.atan2(local_scaling_factor*next_left_shot_vector[0], next_left_shot_vector[1])
-        integer_part_determiner = linear_unadjusted_right_angle/math.pi
-        if abs(integer_part_determiner)%1 < AD_HOC_INT_BUFFERER and int(integer_part_determiner)!=0:
-            if int(integer_part_determiner) > 0:
-                integer_part = int(integer_part_determiner) - 1
-            elif int(integer_part_determiner) < 0:
-                integer_part = int(integer_part_determiner) + 1
-        else:
-            integer_part = int(integer_part_determiner)
 
-        predicted_linear_phase = linear_unadjusted_right_angle #- integer_part*math.pi
+        #for whatever reason, integer part doesn't do anything? i'm assuming that ledoux somehow doesn't normalize prufer angles during the interval and this code definitely does and requires separate somewhat-adhoc corrections via the Constricted_Looping_Monotone_Angle_To_Total_Monotone_Angle function
+        predicted_linear_phase = linear_unadjusted_right_angle
         phase_correction = end_constant_corrector-predicted_linear_phase
         #print(f"phase_correction raw: {phase_correction}")
         #print(f"predicted lin left {predicted_linear_phase}, end const corr left {end_constant_corrector}, lin unadjust left for right {linear_unadjusted_right_angle}")
@@ -556,7 +553,6 @@ def Step_Prufer_Left_Forward(baked_mesh, current_prufer_left, prev_intra_loop_an
             #input('ahh!')
             pass
 
-        #print(f"var integer_part: {integer_part}")
         #print(f"the thing: {linear_unadjusted_right_angle/math.pi}")
 
         final_unadjusted_right_angle = linear_unadjusted_right_angle + phase_correction + range_canonicalization_corrector
@@ -586,6 +582,7 @@ def Step_Prufer_Right_Backward(baked_mesh, current_prufer_right, prev_intra_loop
             else:
                 final_left_angle = raw_end_theta
 
+        #print(f"still looping right angle: {final_left_angle}", end=' ')
         new_total_prufer_left = Constricted_Looping_Monotone_Angle_To_Total_Monotone_Angle(current_prufer_right, final_left_angle, prev_intra_loop_angle_right, direction="down")
         return new_total_prufer_left, final_left_angle
 
@@ -593,16 +590,8 @@ def Step_Prufer_Right_Backward(baked_mesh, current_prufer_right, prev_intra_loop
         linear_unadjusted_left_angle = -local_scaling_factor * baked_mesh["delta_forward_mesh"][logical_index] + math.atan2(local_scaling_factor*current_right_shot_vector[0], current_right_shot_vector[1])
         end_constant_corrector = math.atan2(local_scaling_factor*next_right_shot_vector[0], next_right_shot_vector[1])
 
-        integer_part_determiner = linear_unadjusted_left_angle/math.pi
-        if abs(integer_part_determiner)%1 < AD_HOC_INT_BUFFERER and int(integer_part_determiner)!=0:
-            if int(integer_part_determiner) > 0:
-                integer_part = int(integer_part_determiner) - 1
-            elif int(integer_part_determiner) < 0:
-                integer_part = int(integer_part_determiner) + 1
-        else:
-            integer_part = int(integer_part_determiner)
-
-        predicted_linear_phase = linear_unadjusted_left_angle #- integer_part*math.pi #NOTE: VERY VERY IMPORTANT TO USE INT! here's why: if it's say -.01, using mod or math.floor or native double slash "//" floor division will spit out -1 i.e. greastest integer less than the value, whereas int takes biggest integer smaller than the value and then puts in the right sign (or something like that). ledoux doesn't make it clear that the "integer part" means that, but in context (and practice) it's clearly what she meant.
+        #for whatever reason, integer part doesn't do anything? i'm assuming that ledoux somehow doesn't normalize prufer angles during the interval and this code definitely does and requires separate somewhat-adhoc corrections via the Constricted_Looping_Monotone_Angle_To_Total_Monotone_Angle function
+        predicted_linear_phase = linear_unadjusted_left_angle
         phase_correction = end_constant_corrector - predicted_linear_phase
         #print(f"phase_correction raw: {phase_correction}")
 
@@ -619,12 +608,11 @@ def Step_Prufer_Right_Backward(baked_mesh, current_prufer_right, prev_intra_loop
             pass
 
 
-        #print(f"var integer_part: {integer_part}")
         #print(f"the thing: {linear_unadjusted_left_angle/math.pi}")
 
         final_unadjusted_left_angle = linear_unadjusted_left_angle + phase_correction + range_canonicalization_corrector
         final_left_angle = Adjust_Prufer_Angle(final_unadjusted_left_angle, global_scaling_factor/local_scaling_factor)
-        #print(f"final_left: {final_left_angle}")
+        #print(f"still looping right angle: {final_left_angle}", end=' ')
         new_total_prufer_left = Constricted_Looping_Monotone_Angle_To_Total_Monotone_Angle(current_prufer_right, final_left_angle, prev_intra_loop_angle_right, direction="down")
 
         return new_total_prufer_left, final_left_angle
@@ -640,6 +628,8 @@ def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vecto
         matching_point_index = len(baked_mesh[indep_var_mesh_key])//2
 
     global_scaling_factor_determiner = lambda_ - baked_mesh["potential_mesh"][matching_point_index]
+    if global_scaling_factor_determiner == np.nan:
+        print(f"determiner was nan. {lambda_} minus {baked_mesh['potential_mesh'][matching_point_index]}")
     if global_scaling_factor_determiner < 1:
         global_scaling_factor = 1
     elif global_scaling_factor_determiner >= 1:
@@ -687,6 +677,7 @@ def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vecto
             logical_index += 1
             right_index -= 1
             pbar.update(1)
+            #input(f"{current_prufer_left}, {current_prufer_right}")
 
 
     mismatch =  current_left_shot_vector[1]*current_right_shot_vector[0] - current_right_shot_vector[1]*current_left_shot_vector[0]
@@ -696,7 +687,7 @@ def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vecto
     theta_diff = final_left_prufer - final_right_prufer
     #print(f'diffs: {final_left_prufer} and {final_right_prufer}')
     #print(f'ending prufs shots: {final_left_prufer}, {final_right_prufer}')
-    eigen_index = theta_diff/(4*math.pi)
+    eigen_index = theta_diff/(math.pi) #maybe maybe not a factor of 4 in the denominator?
     return mismatch, eigen_index
 #correct for: mathieu with k_0=1 e_0=5, magnetic, coffey-evans with beta=20 as long as you make very close initial guesses,
 
@@ -728,9 +719,8 @@ def CPM_Convert_EigenvalBound_To_EigenindiceBound(delta_theta, search_bounds): #
 
 #all the previous cpm stuff works only for schrodinger problems, that is one's that look like y''(x) - V(x) = -E y(x). fortunately, there's a transformation known as the liouville transformation that puts sturm liouville problems in "Liouville Normal Form" that has the right form. unfortunately, it's not pretty.
 #for the following: x is the new independent variable, r is the old independent variable, V is the new potential, p q and w are old coefficient functions, z is the old dependent variable, y is the new dependent variable.
-#!!!try storing the intermediate function values on the mesh instead of making a bunch of redundant nested function calls
-#!!!name the various precision numbers like all the different dx's and n's and tols and etcetera, same for the cpm method.
-def Custom_Liouville_Integration(func, r_start, r_end, n=10): #!!!code this specially? the mesh side of discretization is a pathway to many abilities some consider to be...unnatural. this is a stubby prototype
+
+def Custom_Liouville_Integration(func, r_start, r_end, n=10): #!!!code this specially? meshify both the q integrand and the integration accumulated values.
     dx = (r_end - r_start) / n
     acc = 0
     for i in range(n): #MRAM
@@ -738,15 +728,21 @@ def Custom_Liouville_Integration(func, r_start, r_end, n=10): #!!!code this spec
     return acc
 
 def find_contained_interval(val, mesh_of_vals): #suppose mesh_of_vals is a list of monotone vals (e.g. one representing a mesh). this function takes in a value, and finds the mesh vals/mesh "interval" that surrounds it. note that this really works for all ordered lists.
-    for lower_indice in range(len(mesh_of_vals)-1):
-        lower, upper = mesh_of_vals[lower_indice], mesh_of_vals[lower_indice+1]
-        if lower <= val <= upper:
+    lower_indice, upper_indice = 0, len(mesh_of_vals) - 1
+    while True:
+        indice_diff = upper_indice - lower_indice
+        if indice_diff == 1:
             return lower_indice
 
-    print("out of mesh bounds!")
-    raise ArithmeticError #out of mesh bounds #!!!figure out how to make actual error classes already! this is silly!!
+        middle_indice = lower_indice + indice_diff//2
+        middle_val = mesh_of_vals[middle_indice]
+        if val >= middle_val:
+            lower_indice = middle_indice
+        elif val < middle_val:
+            upper_indice = middle_indice
 
 def Make_Liouville_Q_Integrand(p_of_r, w_of_r):#this is the integrand used to do a liouville transformation of the independent variables. x = \int_{r_{min}}^{r} \sqrt {\frac {w(r')} {p(r')}} dr'
+    #!!!store this in a baked mesh, do the custom liouville integration baked into the mesh, as these are all energy independent values.
     return lambda r: (w_of_r(r)/p_of_r(r))**.5
 
 def Dumb_Double_Mesh_Make(Q_Integrand, r_mesh):
@@ -767,7 +763,7 @@ def Make_Smart_Find_X_Given_R(Q_Integrand, double_coordinate_mesh):
         lower_contained_indice = find_contained_interval(requested_r, double_coordinate_mesh["r_mesh"])
         return double_coordinate_mesh["x_mesh"][lower_contained_indice] + Custom_Liouville_Integration(Q_Integrand, double_coordinate_mesh["r_mesh"][lower_contained_indice], requested_r)
     return r_to_x
-def Make_Smart_Find_R_Given_X(Q_Integrand, double_coordinate_mesh, tol=.001): #!!!make this changeable in other funcs
+def Make_Smart_Find_R_Given_X(Q_Integrand, double_coordinate_mesh, tol=.001): #!!!make the tol changeable in other funcs
     def x_to_r(requested_x):
         lower_contained_indice = find_contained_interval(requested_x, double_coordinate_mesh["x_mesh"])
         func_with_zero_at_the_right_r_val = lambda r: Custom_Liouville_Integration(Q_Integrand, double_coordinate_mesh["r_mesh"][lower_contained_indice], r) - requested_x + double_coordinate_mesh["x_mesh"][lower_contained_indice]
@@ -785,7 +781,6 @@ def Bake_Sigma(sigma_of_r, double_coordinate_mesh, r_var_name="r_mesh"):
     return
 
 def Find_Reciprocal_Sigma_2nd_Deriv_At_A_Good_Indice(baked_mesh, q_of_r, w_of_r, indice, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh"):
-    r = baked_mesh[r_var_mesh_name][indice]
     x = baked_mesh[x_var_mesh_name][indice]
     recip_sigma_of_r = 1/baked_mesh["sigma_mesh"][indice]
     x_b1 = baked_mesh[x_var_mesh_name][indice-1]
@@ -836,9 +831,187 @@ def CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot
     #r_mesh is now a double_coordinate_mesh baked with potentials
     mis = lambda lambda_: CPM_Method_Shoot_And_Mismatch(pot_of_x_baked_double_coordinate_mesh, init_left_shot_vector, init_right_shot_vector, lambda_, indep_var_mesh_key="x_mesh", matching_point_index=None, disable_delta_forward_baking_pbar=True, disable_prop_baking_pbar=True, disable_shooting_pbar=disable_shooting_pbar, disable_local_scaling_factors_baking_pbar=disable_local_scaling_factors_baking_pbar)
     return pot_of_x_baked_double_coordinate_mesh, mis
-#works for azimuthal (magnetic quantum numbers), polar (azimuthal quantum numbers), radial?
+#works for azimuthal (magnetic quantum numbers), polar (azimuthal quantum numbers), radial. prufer not so much - not at all monotonic sometimes.for radial problem, has dips at eigen values possibly?
 
 
+
+def check_stable_part_of_unstable_monotone(unstable_monotone, x_val_to_test, sustained_monotone_radius=.01, uni_directional_sustained_monotone_step_sample_count=5, sustained_monotone_success_sample_thresh=.75):
+    upper_test_lim, lower_test_lim = x_val_to_test + sustained_monotone_radius, x_val_to_test - sustained_monotone_radius
+    upper_x_test_vals = np.arange(x_val_to_test, upper_test_lim, (upper_test_lim - x_val_to_test) / uni_directional_sustained_monotone_step_sample_count)
+    lower_x_test_vals = np.arange(x_val_to_test, lower_test_lim, (lower_test_lim - x_val_to_test) / uni_directional_sustained_monotone_step_sample_count)
+
+    func_val_at_test = unstable_monotone(x_val_to_test)
+    upper_test_result = 0
+    for upper_x in upper_x_test_vals:
+        upper_test_result += int(unstable_monotone(upper_x) >= func_val_at_test)
+
+    lower_test_result = 0
+    for lower_x in lower_x_test_vals:
+        lower_test_result += int(unstable_monotone(lower_x) <= func_val_at_test)
+
+    return bool( (upper_test_result + lower_test_result) / (len(upper_x_test_vals) + len(lower_x_test_vals)) >= sustained_monotone_success_sample_thresh) #the bool here is really only for clarity.
+
+
+
+def find_candidate_roots(tailored_prufer, displacement_mag_quit_thresh=1000, stop_at_candidate_roots_num_thresh=3, stop_at_total_steps_total_thresh=500, stop_at_total_steps_per_root_thresh=30, subsequent_root_agreement_tol=.001, interval_tol=.0001, mis_val_tol=.01, start_val=0, start_direction="right", start_step_mag=.001, step_mag_increase_factor=2, sustained_monotone_radius_factor_as_ratio_of_prev_step=.1, uni_directional_sustained_monotone_step_sample_count=10, sustained_monotone_success_sample_thresh=.75, fake_root_restart_movement_factor_as_ratio_of_start_step=1): #mis_and_cpm_prufer_mis is a func taking lambda_ and outputting [mismatch, eigen_index]
+    #breakpoint()
+    total_steps_total = 0
+    current_interval = [-np.inf, np.inf]
+    current_x = start_val
+    original_step_mag = start_step_mag
+    current_step_mag = start_step_mag
+    prev_direction = start_direction
+    total_steps_for_this_root = 0
+    candidate_roots = []
+    while total_steps_total < stop_at_total_steps_total_thresh and len(candidate_roots) < stop_at_candidate_roots_num_thresh:
+        #breakpoint()
+        #find a candidate root
+        interval_found = False
+        while total_steps_for_this_root < stop_at_total_steps_per_root_thresh and total_steps_total < stop_at_total_steps_total_thresh:
+            if abs(current_x-start_val) >= displacement_mag_quit_thresh:
+                print("displacement mag exceeded displacement_mag_quit_thresh")
+                curr_pruf_val = tailored_prufer(current_x)
+                if curr_pruf_val < 0:
+                    return [[-np.inf, current_x - start_val, {"no_root_found"}]]
+                elif curr_pruf_val > 0:
+                    return [[np.inf, current_x - start_val, {"no_root_found"}]]
+
+            if not interval_found:
+                #breakpoint()
+                curr_pruf_val = tailored_prufer(current_x)
+                if curr_pruf_val < 0: #don't put the 0-mis_val_tol here --- tol checking is in the main stopping conditional, and this way if it's in the mis_val_tol but the interval still hasn't been found it will still look for an interval.
+                    current_interval[0] = max(current_interval[0], current_x)
+
+                    if prev_direction == "right":
+                        current_step_mag *= step_mag_increase_factor
+                        current_x += current_step_mag
+                    elif prev_direction == "left":
+                        if check_stable_part_of_unstable_monotone(tailored_prufer, current_x, sustained_monotone_radius=.01, uni_directional_sustained_monotone_step_sample_count=10, sustained_monotone_success_sample_thresh=.75):
+                            prev_direction = "right"
+                            current_step_mag /= step_mag_increase_factor
+                            current_x += current_step_mag
+                        else: #keep going in prev_direction
+                            current_step_mag *= step_mag_increase_factor
+                            current_x -= current_step_mag
+
+
+                elif curr_pruf_val > 0:
+                    current_interval[1] = min(current_interval[1], current_x)
+
+                    if prev_direction == "left":
+                        current_step_mag *= step_mag_increase_factor
+                        current_x -= current_step_mag
+                    elif prev_direction == "right":
+                        if check_stable_part_of_unstable_monotone(tailored_prufer, current_x, sustained_monotone_radius=.01, uni_directional_sustained_monotone_step_sample_count=10, sustained_monotone_success_sample_thresh=.75):
+                            prev_direction = "left"
+                            current_step_mag /= step_mag_increase_factor
+                            current_x -= current_step_mag
+                        else: #keep going in prev_direction
+                            current_step_mag *= step_mag_increase_factor
+                            current_x += current_step_mag
+
+                if abs(current_interval[0]) != np.inf and abs(current_interval[1]) != np.inf:
+                    interval_found = True
+
+            else:
+                current_x = (current_interval[0] + current_interval[1])/2
+                curr_pruf_val = tailored_prufer(current_x)
+                if curr_pruf_val < 0:
+                    current_interval[0] = current_x
+                elif curr_pruf_val > 0:
+                    current_interval[1] = current_x
+
+
+            if (abs(curr_pruf_val) < mis_val_tol and (current_interval[1]!=np.inf or  current_interval[0]!=np.inf)) or abs(current_interval[1] - current_interval[0]) < interval_tol:
+                candidate_roots.append( [(current_interval[0]+current_interval[1])/2, (current_interval[1] - current_interval[0]), {"untagged"}] ) #average, error_radius
+                break
+
+            elif curr_pruf_val==0:
+                candidate_roots.append( [current_x, 0, {"untagged"}] )
+                break
+
+            total_steps_for_this_root += 1
+            total_steps_total += 1
+
+        else: #else in the while means that this branch executes if the condition in the while is false but not if there was a break statement.#one of the total step threshes has been exceeded #!!!code this
+            if total_steps_total >= stop_at_total_steps_total_thresh:
+                if curr_pruf_val < 0:
+                    print("total_steps_total exceeded stop_at_total_steps_total_thresh!")
+                    return [[-np.inf, current_x - start_val, {"no_root_found"}]]
+                elif curr_pruf_val > 0:
+                    return [[np.inf, current_x - start_val, {"no_root_found"}]]
+            else: # we know it's because the this root thresh is exceeded.
+                print("total_steps_for_this_root exceeded stop_at_total_steps_per_root_thresh!")
+                if curr_pruf_val < 0:
+                    return [[-np.inf, current_x - start_val, {"no_root_found"}]]
+                elif curr_pruf_val > 0:
+                    return [[np.inf, current_x - start_val, {"no_root_found"}]]
+
+
+        if len(candidate_roots) >= 2 and ((candidate_roots[-2][0] + subsequent_root_agreement_tol < candidate_roots[-1][0] < candidate_roots[-2][0] - subsequent_root_agreement_tol) or ((candidate_roots[-2][0] - candidate_roots[-2][1]) < (candidate_roots[-1][0] + candidate_roots[-1][1])) or ((candidate_roots[-1][0] - candidate_roots[-1][1]) < (candidate_roots[-2][0] + candidate_roots[-2][1]))):
+            candidate_roots.pop()
+            candidate_roots[-1][2].discard("untagged")
+            candidate_roots[-1][2].add("subsequent_candidate_root_agreement")
+            break
+        elif len(candidate_roots) != 0:
+            current_interval = [-np.inf, np.inf]
+            current_x = candidate_roots[-1][0] + candidate_roots[-1][1] + original_step_mag*fake_root_restart_movement_factor_as_ratio_of_start_step
+            current_step_mag = start_step_mag
+            prev_direction = start_direction
+            total_steps_for_this_root = 0
+        else:
+            print("no candidate roots after first search! breaking the while")
+            break
+    else:
+        if len(candidate_roots) >= stop_at_candidate_roots_num_thresh:
+            return candidate_roots
+        elif total_steps_total >=  stop_at_total_steps_total_thresh:
+            if len(candidate_roots) == 0:
+                print("Exceeded total_steps_total, but no candidate roots!")
+                warn("Exceeded total_steps_total, but no candidate roots!")
+                if curr_pruf_val < 0:
+                    return [[-np.inf, current_x - start_val, {"no_root_found"}]]
+                elif curr_pruf_val > 0:
+                    return [[np.inf, current_x - start_val, {"no_root_found"}]]
+                else:
+                    warn("this shouldn't be possible")
+                    raise ArithmeticError #impossible condition, pru val is 0 but no candidate roots after exceeding total steps
+            else:
+                return candidate_roots
+
+    if "subsequent_candidate_root_agreement" in candidate_roots[-1][2]:
+        return candidate_roots
+    else:
+        warn("this shouldn't be possible")
+        raise ArithmeticError #impossible condition, shouldn't have gotten here without returning already
+
+def find_stable_roots_in_mis_and_cpm_prufer(mis_and_cpm_prufer, target_index, sanity_check_tol=.1, sanity_check_step_for_zero_radius_pruf=.005, stop_at_candidate_roots_num_thresh=3, stop_at_total_steps_total_thresh=500, stop_at_total_steps_per_root_thresh=30, subsequent_root_agreement_tol=.001, interval_tol=.0001, pruf_mis_val_tol=.01, start_val=0, start_direction="right", start_step_mag=.001, step_mag_increase_factor=2, sustained_monotone_radius_factor_as_ratio_of_prev_step=.1, uni_directional_sustained_monotone_step_sample_count=10, sustained_monotone_success_sample_thresh=.75, fake_root_restart_movement_factor_as_ratio_of_start_step=1):
+    #breakpoint()
+    mis = lambda lambda_: mis_and_cpm_prufer(lambda_)[0]
+    tailored_prufer = lambda lambda_: mis_and_cpm_prufer(lambda_)[1] - target_index
+    candidate_roots = find_candidate_roots(tailored_prufer, stop_at_candidate_roots_num_thresh=stop_at_candidate_roots_num_thresh, stop_at_total_steps_total_thresh=stop_at_total_steps_total_thresh, stop_at_total_steps_per_root_thresh=stop_at_total_steps_per_root_thresh, subsequent_root_agreement_tol=subsequent_root_agreement_tol, interval_tol=interval_tol, mis_val_tol=pruf_mis_val_tol, start_val=start_val, start_direction=start_direction, start_step_mag=start_step_mag, step_mag_increase_factor=step_mag_increase_factor, sustained_monotone_radius_factor_as_ratio_of_prev_step=sustained_monotone_radius_factor_as_ratio_of_prev_step, uni_directional_sustained_monotone_step_sample_count=uni_directional_sustained_monotone_step_sample_count, sustained_monotone_success_sample_thresh=sustained_monotone_success_sample_thresh, fake_root_restart_movement_factor_as_ratio_of_start_step=fake_root_restart_movement_factor_as_ratio_of_start_step)
+    verified_roots = []
+    for candidate_root in candidate_roots:
+        #breakpoint()
+        if abs(candidate_root[0]) != np.inf and ("no_root_found" not in candidate_root[2]):
+            if abs(mis(candidate_root[0])) < sanity_check_tol:
+                verified_roots.append(candidate_root)
+
+            if abs(candidate_root[1]) == 0:
+                left_sanity_check, right_sanity_check = candidate_root[0] - sanity_check_step_for_zero_radius_pruf, candidate_root[0] + sanity_check_step_for_zero_radius_pruf
+            else:
+                left_sanity_check, right_sanity_check = candidate_root[0] - candidate_root[1], candidate_root[0] + candidate_root[1]
+
+            left_sanity_result, right_sanity_result = mis(left_sanity_check), mis(right_sanity_check)
+            sanity_check_signs = np.sign([left_sanity_result, right_sanity_result])
+            same_sign_bool = sanity_check_signs[0]*sanity_check_signs[1]
+            if same_sign_bool == -1:
+                verified_roots.append(candidate_root)
+
+        else:
+            continue
+
+    return verified_roots
 
 
 
@@ -871,7 +1044,7 @@ def find_first_n_eigen_vals_given_original_boundary_conditions_prufer(p, q, w, x
 
     return eigensAndErrors
 
-def find_eigen_funcs_given_eigen_vals(lambda_list, p, q, w, x_init, y_init, dy__dx_init, x_end, dx):#!!!idea for these dx's to be smaller - higher dx to locate eigenvalue, lower dx when doing final pass computing of the function - less accuarcy needed to zero in on the right root (also that op is more costly), and then can speed up during final pass
+def find_eigen_funcs_given_eigen_vals(lambda_list, p, q, w, x_init, y_init, dy__dx_init, x_end, dx):
     return map(lambda lambda_: Solve_LSLP_IVP(lambda_, p, q, w, x_init, y_init, dy__dx_init, x_end, dx, store_solution=True)[3], lambda_list)
 
 
@@ -1109,6 +1282,7 @@ while True:
 
 
 #cpm tests
+
 '''
 #azimuthal equation (magnetic quantum numbers)
 p_of_r, q_of_r, w_of_r = lambda x: 1, lambda x: 0, lambda x: 1
@@ -1120,7 +1294,7 @@ baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_
 #while True:
 #    guess = float(input("guess: "))
 #    print(Secant_Method(mis_eigen, guess, guess+.01, newton_tol, f_index_to_rootfind=0))
-generic_plot(np.arange(-1,27,.1),lambda l: mis_eigen(l)[1])
+#generic_plot(np.arange(-1,27,.1),lambda l: mis_eigen(l)[1])
 '''
 
 
@@ -1151,34 +1325,40 @@ generic_plot(np.arange(-1,27,.1),lambda l: mis_eigen_0(l)[0])
 '''
 
 
-#radial
-electron_mass, proton_mass = constants.electron_mass, constants.proton_mass
-reduced_mass = electron_mass*proton_mass/(electron_mass+proton_mass)
-electron_charge = constants.elementary_charge
-vaccuum_permittivity = constants.epsilon_0
-hbar = constants.hbar
+def main():
+    #radial
+    electron_mass, proton_mass = constants.electron_mass, constants.proton_mass
+    reduced_mass = electron_mass*proton_mass/(electron_mass+proton_mass)
+    electron_charge = constants.elementary_charge
+    vaccuum_permittivity = constants.epsilon_0
+    hbar = constants.hbar
 
-l = 1
-boundary_epsilon = .001
-mid_r_start = 1
-mid_r_end = 10
-boundary_inf_approx = 100
-coulomb_z = 1/2
-p_of_r,q_of_r,w_of_r = lambda x: 1, lambda x: l*(l+1)/(x**2) - (2*coulomb_z)/(x), lambda x: 1
-mesh_dr_start = .001
-mesh_dr_mid = .01
-mesh_dr_end = 1
-r_mesh_start = np.arange(boundary_epsilon, mid_r_start, mesh_dr_start)
-r_mesh_mid = np.arange(mid_r_start, mid_r_end, mesh_dr_mid)
-r_mesh_end = np.arange(mid_r_end, boundary_inf_approx, mesh_dr_end)
-r_mesh = np.concatenate([r_mesh_start, r_mesh_mid, r_mesh_end])
-init_left_shot_vector, init_right_shot_vector = [0,1], [0,1]
-Num_D_Liouville_dx = .001
-baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r,q_of_r,w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=Num_D_Liouville_dx, disable_shooting_pbar=True)
-print("plotting")
-generic_plot(np.arange(-.1,0,.001), lambda e: mis_eigen(e)[0])
+    l = 1
+    boundary_epsilon = .0001
+    mid_r_start = 1
+    mid_r_end = 50
+    boundary_inf_approx = 500
+    #p_of_r,q_of_r,w_of_r = lambda x: x**2, lambda x: l*(l+1) - ( ((2*reduced_mass*(x**2))/(hbar**2)) * ((electron_charge**2)/(4*math.pi*vaccuum_permittivity*x))  ), lambda x: ((2*reduced_mass*(x**2))/(hbar**2))
+    p_of_r,q_of_r,w_of_r = lambda x: 1, lambda x: l*(l+1)/(x**2) - (1/x), lambda x: 1
+    mesh_dr_start = .0001
+    mesh_dr_mid = .1
+    mesh_dr_end = 10
+    r_mesh_start = np.arange(boundary_epsilon, mid_r_start, mesh_dr_start)
+    r_mesh_mid = np.arange(mid_r_start, mid_r_end, mesh_dr_mid)
+    r_mesh_end = np.arange(mid_r_end, boundary_inf_approx, mesh_dr_end)
+    r_mesh = np.concatenate([r_mesh_start, r_mesh_mid, r_mesh_end])
+    init_left_shot_vector, init_right_shot_vector = [0,1], [0,1]
+    Num_D_Liouville_dx = .0001
+    baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r,q_of_r,w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=Num_D_Liouville_dx, disable_shooting_pbar=True)
+    #print("plotting")
+    #generic_plot(np.arange(-.08,-0.01,.0001), lambda e: mis_eigen(e)[1])
 
 
+
+    stable_roots = lambda index: find_stable_roots_in_mis_and_cpm_prufer(mis_eigen, index)
+    print([stable_roots(i) for i in range(1,2)])
+
+main()
 '''
 while True:
     guess = float(input("guess: "))
