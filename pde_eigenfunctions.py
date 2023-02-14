@@ -124,6 +124,32 @@ def Negate(term):
         breakpoint()
 
 #def Sum_Wrap(sum_func_name, multiset_of_term)
+def Term_Product(prod_func_name, terms, distribute=True, allow_single_product=True): #!!! can't handle division - combine the division of product function into this and a Reciprocate function, just like with term_sum
+    if type(terms) == dict or type(terms) == frozendict:
+        if allow_single_product:
+            return Term_Product("Single_Product", frozenmultiset([terms]))
+        else:
+            return terms
+
+    new_terms = multiset()
+    need_to_recurse = False
+    for term in terms:
+        if term['type'] != "Product" or (not distribute):
+            new_terms.add(term)
+        else:
+            new_terms.update(term['terms'])
+            need_to_recurse = True
+
+    if need_to_recurse:
+        return Term_Product(prod_func_name, new_terms)
+    else:
+        var_names = set()
+        for term in new_terms:
+            var_names.update(term['var_names'])
+        out_prod = frozendict({'type': "Product", "name": f"'{prod_func_name}'", "terms": frozenmultiset(new_terms), "var_names": frozenset(var_names)})
+        return out_prod
+
+
 def Term_Sum(sum_func_name, terms):
     if type(terms) == dict or type(terms) == frozendict:
         return terms
@@ -223,12 +249,16 @@ def Commute_Product_With_Applied_Differential_Operator(applied_operator):
     uncommuted_terms = frozenmultiset(uncommuted_terms)
     uncommuted_var_names = frozenset(uncommuted_var_names)
 
-    commuted_product = {"type": "Product", "name": f"Commuted_Parts_Of_'{prod_of_terms_name}'", "terms": commuted_terms, "var_names": commuted_var_names}
-    out_applied_differential_operator = {"type": "Applied_Differential_Operator", "name": f"Applied_'{operator_name}'_To_Uncommuted_Parts_Of_'{prod_of_terms_name}'", "operator": operator, "applied_to_term": uncommuted_terms, "var_names": uncommuted_var_names}
+    commuted_product = Term_Product(f"Commuted_Parts_Of_'{prod_of_terms_name}'", commuted_terms)
+    uncommuted_product = Term_Product(f"Uncommuted_Parts_Of_'{prod_of_terms_name}'", uncommuted_terms)
+    out_applied_differential_operator = {"type": "Applied_Differential_Operator", "name": f"Applied_'{operator_name}'_To_Uncommuted_Parts_Of_'{prod_of_terms_name}'", "operator": operator, "applied_to_term": uncommuted_product, "var_names": uncommuted_var_names}
 
-    all_vars = frozenset.union(commuted_var_names, uncommuted_var_names)
+    #all_vars = frozenset.union(commuted_var_names, uncommuted_var_names)
     out_terms = frozenmultiset({frozendict(commuted_product), frozendict(out_applied_differential_operator)})
-    return frozendict({"type": "Product", "name": f"Separated_'{applied_operator_term_name}'", "terms": out_terms, "var_names": all_vars, 'hints': frozendict({"commutation_hints": frozendict({"commuted_var_names": commuted_var_names, "uncommuted_var_names": uncommuted_var_names}) }) })
+    unhinted = Term_Product(f"Separated_'{applied_operator_term_name}'", out_terms)
+    unhinted = dict(unhinted)
+    unhinted['hints'] = frozendict({"commutation_hints": frozendict({"commuted_var_names": commuted_var_names, "uncommuted_var_names": uncommuted_var_names}) })
+    return frozendict(unhinted)
 
 def Divide_Products(numerator_product, denominator_product): #!!!handle exponents
     if numerator_product["type"] != "Product":
@@ -236,7 +266,8 @@ def Divide_Products(numerator_product, denominator_product): #!!!handle exponent
     if denominator_product["type"] != "Product":
         raise(TypeError("Cannot divide by a non-product!"))
 
-
+    numerator_product = dict(numerator_product)
+    denominator_product = dict(denominator_product)
     for term in denominator_product['terms']:
         if term in numerator_product['terms']:
             new_numerator_product_terms, new_denominator_product_terms = numerator_product['terms'], denominator_product['terms']
@@ -244,14 +275,8 @@ def Divide_Products(numerator_product, denominator_product): #!!!handle exponent
             new_numerator_product_terms = frozenmultiset.difference(numerator_product['terms'], denominator_product['terms'])
             new_denominator_product_terms = frozenmultiset.difference(denominator_product['terms'], numerator_product['terms'])
 
-            numerator_product = dict(numerator_product)
-            denominator_product = dict(denominator_product)
-
             numerator_product['terms'] = new_numerator_product_terms
             denominator_product['terms'] = new_denominator_product_terms
-
-            numerator_product = frozendict(numerator_product)
-            denominator_product = frozendict(denominator_product)
 
     new_numerator_var_names = set()
     for numerator_term in numerator_product['terms']:
@@ -261,16 +286,21 @@ def Divide_Products(numerator_product, denominator_product): #!!!handle exponent
     for denominator_term in denominator_product['terms']:
         new_denominator_var_names.update(denominator_term['var_names'])
 
-    new_numerator_var_names = frozenmultiset(new_numerator_var_names)
-    new_denominator_var_names = frozenmultiset(new_denominator_var_names)
+    new_numerator_var_names = frozenset(new_numerator_var_names)
+    new_denominator_var_names = frozenset(new_denominator_var_names)
 
     numerator_product['var_names'] = new_numerator_var_names
     denominator_product['var_names'] = new_denominator_var_names
+    numerator_product = frozendict(numerator_product)
+    denominator_product = frozendict(denominator_product)
     all_vars = frozenset.union(new_numerator_var_names, new_denominator_var_names)
 
     return frozendict({"type": "Fraction", "name": f"Divide_'{numerator_product['name']}'_By_'{denominator_product['name']}'", 'numerator': numerator_product, 'denominator': denominator_product, 'var_names': all_vars})
 
-def Isolate_Differential_Operator_Var_In_Commuted_Equation_With_Commutation_Hints(equation, var): #does no commutation
+def Equation_Wrapper(LHS, RHS, name):
+    return frozendict({'type': "Equals", 'name': name, 'LHS': LHS, 'RHS': RHS})
+
+def Isolate_Differential_Operator_Var_In_Commuted_Equation_With_Commutation_Hints(equation, var):
     if equation['type'] != "Equals":
         raise(TypeError("Cannot isolate in non-equation!"))
 
@@ -299,11 +329,172 @@ def Isolate_Differential_Operator_Var_In_Commuted_Equation_With_Commutation_Hint
     new_LHS =  Term_Sum('isolated_lhs', frozenmultiset.union(left['terms'], Negate(left_without_sum)['terms'], right_with_sum['terms']))
     new_RHS = Term_Sum('isolated_rhs', frozenmultiset.union(right['terms'], left_without_sum['terms'], Negate(right_with_sum)['terms']))
 
-    return frozendict({'type': "Equals", 'name': 'isolated_differential_operator_equation', 'LHS': new_LHS, 'RHS': new_RHS})
+    return Equation_Wrapper(new_LHS, new_RHS, f"isolated_differential_operator_equation_of_'{equation['name']}'")
+
+def Distribute_Division(term_sum, distributing_denominator, allow_single_product=True):
+    breakpoint()
+    if term_sum['type'] != "Sum":
+        if allow_single_product:
+            return Term_Product("Single_Product", frozenmultiset([term_sum]))
+        else:
+            raise(TypeError("Cannot distribute division through non-sum!"))
+
+    if distributing_denominator['type'] != "Product":
+        distributing_denominator = frozendict({"type": "Product", 'name': f"Lone_Product_{distributing_denominator['name']}", "terms": frozenmultiset([distributing_denominator]), "var_names": distributing_denominator['var_names']})
+
+    sum_name = term_sum['name']
+    distributing_denominator_name = distributing_denominator['name']
+    distributed_through_terms = multiset()
+    for term in term_sum['terms']:
+        if term['type'] != "Product":
+            term = frozendict({"type": "Product", 'name': f"Lone_Product_{term['name']}", "terms": frozenmultiset([term]), "var_names": term['var_names']})
+
+        distributed_through_terms.add(Divide_Products(term, distributing_denominator))
+
+    out_sum_name = f"Distributed_Divided_'{sum_name}'_By_'{distributing_denominator_name}'"
+    return Term_Sum(out_sum_name, frozenmultiset(distributed_through_terms))
+
+def Factor_Sum_Of_Products(sum_of_products): #only factors out singles, no squares etc.
+    prospective_factor_outable_terms = set()
+    known_not_factor_outable_terms = set()
+    sum_terms = sum_of_products['terms']
+    first_term = True
+    for sum_term in sum_terms:
+        prod_terms = sum_term['terms']
+        if first_term:
+            prospective_factor_outable_terms.update(prod_terms)
+            first_term = False
+        else:
+            learnt_not_factor_outable_terms = set.difference(prospective_factor_outable_terms, prod_terms)
+            prospective_factor_outable_terms.difference_update(learnt_not_factor_outable_terms)
+            known_not_factor_outable_terms.update(learnt_not_factor_outable_terms)
+
+    factored_out_terms = set()
+    for factor_outable_term in prospective_factor_outable_terms:
+        factored_out_terms.add(factor_outable_term)
+
+    factored_out_terms = frozenset(factored_out_terms)
+    factored_out_prod = Term_Product('Factored_Out_Part', factored_out_terms)
+
+    divided_terms = multiset()
+    for term in sum_terms:
+        copied_term = term.copy()
+        copied_term['terms'] = term['terms'].difference(factored_out_terms)
+        divided_terms.add(frozendict(copied_term))
+
+    divided_terms = frozenmultiset(divided_terms)
+
+    factored_remains_part = Term_Sum("Factored_Remains_Part", divided_terms)
+
+    return Term_Product('factorized', frozenmultiset([factored_out_prod, factored_remains_part]), distribute=False)
+
+def Perform_Single_Separation_On_Isolated_Factored_Differential_Equation(equation, var):
+    if equation['type'] != "Equals":
+        raise(TypeError("Cannot isolate in non-equation!"))
+
+
+    LHS = equation['LHS']
+    RHS = equation['RHS']
+
+    if LHS['type'] != "Product":
+        if LHS['type'] == "Sum":
+            items = list(LHS['terms'].items())
+            if len(items) != 1:
+                raise(TypeError("Cannot isolate with sum in LHS!"))
+            else:
+                term = items[0][0]
+                number = items[0][1]
+                LHS = Term_Product("Single_Product_With_Constant", [term, frozendict({"name": f"Constant_f{number}", "type": "Constant", "value": number, "var_names": frozenmultiset()})])
+
+        LHS = Term_Product("Single_Product", [LHS])
+
+    if RHS['type'] != "Sum":
+         RHS = Term_Sum("Single_Term_Sum", [RHS])
+
+    left_terms_to_divide = multiset()
+    found_the_term_to_keep = False
+    for term in LHS['terms']:
+        if term['type'] == 'Applied_Differential_Operator':
+            if found_the_term_to_keep:
+                raise(TypeError("Cannot seperate with more than one differential operator on the LHS!"))
+            else:
+                left_term_to_keep = term
+                if len(term['var_names']) > 1:
+                    raise(TypeError("Cannot separate with a differential operator that has more than one variable!"))
+                lhs_var_to_keep = list(term['var_names'])[0]
+                found_the_term_to_keep = True
+        else:
+            left_terms_to_divide.add(term)
+
+    left_terms_to_divide = frozenmultiset(left_terms_to_divide)
+
+    right_terms_to_divide = multiset()
+    right_terms_to_keep = multiset()
+    for term in RHS['terms']:
+        if lhs_var_to_keep in term['var_names']:
+            right_terms_to_divide.add(term)
+        else:
+            right_terms_to_keep.add(term)
+
+    right_terms_to_divide = frozenmultiset(right_terms_to_divide)
+    right_terms_to_keep = frozenmultiset(right_terms_to_keep)
+
+    new_LHS = Divide_Products(Term_Product("LHS_keep", left_term_to_keep), Term_Product("RHS_div_out", right_terms_to_divide))
+    new_RHS = Divide_Products(Term_Product("RHS_keep", right_terms_to_keep), Term_Product("LHS_div_out", left_terms_to_divide))
+
+    isolated_equation = Equation_Wrapper(new_LHS, new_RHS, f"Single_Separated_{lhs_var_to_keep}_{equation['name']}")
+
+    return isolated_equation
 
 
 
 
+
+
+def expr_repr(typed_dict):
+    dict_type = typed_dict['type']
+    if dict_type == 'Func':
+        raw_out = typed_dict['name']
+    elif dict_type == 'Sum':
+        raw_out = ''
+        for term in typed_dict['terms']:
+            raw_out += expr_repr(term) + ' + '
+
+        raw_out = raw_out[:-3]
+    elif dict_type == 'Product':
+        raw_out = ''
+        for term in typed_dict['terms']:
+            if term['type'] == "Sum":
+                raw_out += f"({expr_repr(term)})*"
+            else:
+                raw_out += f"{expr_repr(term)}*"
+
+        raw_out = raw_out[:-1]
+    elif dict_type == "Fraction":
+        numerator = typed_dict['numerator']
+        denominator = typed_dict['denominator']
+
+        num_str, den_str = expr_repr(numerator), expr_repr(denominator)
+        return f"({num_str})/({den_str})"
+    elif dict_type == 'Equals':
+        LHS, RHS = expr_repr(typed_dict['LHS']), expr_repr(typed_dict['RHS'])
+        raw_out = f"{LHS} = {RHS}"
+    elif dict_type == "Differential_Operator":
+        var_names = typed_dict['var_names']
+        var_str = ''
+        for var in list(var_names):
+            var_str += var + ","
+
+        var_str = var_str[:-1]
+        raw_out = f"D_{var_str}"
+    elif dict_type == "Applied_Differential_Operator":
+        operator_expr = expr_repr(typed_dict['operator'])
+        applied_to_term_expr = expr_repr(typed_dict['applied_to_term'])
+        raw_out = f"{operator_expr}[{applied_to_term_expr}]"
+    else:
+        raw_out = str(typed_dict)
+
+    return raw_out.replace("'", "")
 
 '''
 def Bucket_Terms_By_Vars(terms):
@@ -371,4 +562,12 @@ comm_r, comm_theta, comm_phi = Commute_Product_With_Applied_Differential_Operato
 sum_of_comm = Term_Sum('total_op', multiset([comm_r, comm_theta, comm_phi]))
 
 equation = frozendict({'type': 'Equals', 'name': 'in_equation', 'LHS': sum_of_comm, 'RHS': Term_Sum('zero', frozenmultiset())})
+expr_repr(equation)
 isolated_equation = Isolate_Differential_Operator_Var_In_Commuted_Equation_With_Commutation_Hints(equation, 'r')
+#!!!Automate Knowing To Factor!
+isolated_equation = dict(isolated_equation)
+isolated_equation['RHS'] = Factor_Sum_Of_Products(isolated_equation['RHS'])
+isolated_equation = frozendict(isolated_equation)
+breakpoint()
+out =  Perform_Single_Separation_On_Isolated_Factored_Differential_Equation(isolated_equation, 'r') #!!!no work - divides entire product terms
+expr_repr(out)
