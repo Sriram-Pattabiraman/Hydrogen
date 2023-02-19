@@ -69,7 +69,6 @@ def Make_Eigen_Func_Given_Eigen(problem_funcs, x_start, x_end, dx=.0001, which_b
     def Eigen_Func_Given_Eigen(lambda_, which_basis_init_vector=which_basis_init_vector, parallel_pool=parallel_pool):
         with parallel_pool as pool:
             return sl.Solve_LSLP_IVP(lambda_, *problem_funcs, x_start, *basis_init_vectors[which_basis_init_vector], x_end, dx, parallel_pool=pool, store_solution=True)[3]
-
     return Eigen_Func_Given_Eigen
 
 def unravel_eigens(eigens_for_each_coord, parallel_pool=None): #this function looks very simple. it's actually a little sophisticated. hopefully, it's easy to understand even if it was tricky to write. the basic idea is to run through the states of the past coords, and put into a new state list  (*past state, new_possible_coord) for every new_possible_coord in prob.pop()(past state)
@@ -140,20 +139,19 @@ def interp(dim, points, time_vector, points_indice=0, base_interp=lerp):
 def Make_Make_Total_Eigen_Func_Given_Eigens_Given_Component_Eigen_Funcs(eigen_funcs_for_each_coord, total_out_given_components=lambda comps: np.prod(comps)):
     eigen_funcs_for_each_coord = np.array(eigen_funcs_for_each_coord)
     def Make_Total_Eigen_Func_Given_Eigens(*eigens, eigen_funcs_for_each_coord=eigen_funcs_for_each_coord):
-        def Total_Eigen_Func(*position_vect, eigens=eigens, eigen_funcs_for_each_coord=eigen_funcs_for_each_coord):
+        all_outs = []
+        all_coords = []
+        for i in range(len(eigen_funcs_for_each_coord)):
+            this_func = np.array(eigen_funcs_for_each_coord[i](*eigens[:i])(eigens[i]), dtype='float64')
+            all_coords.append(this_func[:,0])
+            all_outs.append(this_func[:,1])
+        def Total_Eigen_Func(*position_vect, eigens=eigens, eigen_funcs_for_each_coord=eigen_funcs_for_each_coord, all_coords=all_coords, all_outs=all_outs):
             if len(eigens) < len(eigen_funcs_for_each_coord):
                 raise(TypeError(f"Vector_Eigen missing {len(eigen_funcs_for_each_coord) - len(eigens)} required positional arguments"))
             elif len(eigens) > len(eigen_funcs_for_each_coord):
                 raise(TypeError(f"Vector_Eigen takes {len(eigen_funcs_for_each_coord)} positional arguments but {len(eigens)} were given"))
                 
-            breakpoint()
-
-            all_outs = []
-            all_coords = []
-            for i in range(len(eigen_funcs_for_each_coord)):
-                this_func = np.array(eigen_funcs_for_each_coord[i](*eigens[:i])(eigens[i]), dtype='float64')
-                all_coords.append(this_func[:,0])
-                all_outs.append(this_func[:,1])
+            #breakpoint()    
 
             all_surrounding_indices = []
             for i in range(len(eigens)):
@@ -358,6 +356,9 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     vector_eigen_func(1,3,-.02275)(1,1,1)
     #eigen_func_for_each_coord = lambda azi_eig, theta_eig, radial_eig: [azi_eigen_func_given_eigen_b1(azi_eig), theta_eigen_func_given_azi_eig_b1(azi_eig)(theta_eig), radial_eigen_func_given_theta_eig_b1(azi_eig, theta_eig)(radial_eig)]
     #prod_func = lambda azi_eig, theta_eig, radial_eig: [eigen_func_for_each_coord(azi_eig, theta_eig, radial_eig)]
+    
+    #!!!monkey patch!
+    radial_eigen_func_given_theta_eig = lambda *prev_coord_eigens: 1*[]
     eigens_for_each_coord = [azi_eigens, theta_eigens_given_azi_eig, radial_eigens_given_theta_eig]
     breakpoint()
     coord_eigens = unravel_eigens(eigens_for_each_coord)
@@ -380,7 +381,7 @@ out_func = vector_eigen_for_choice_of_basis_init_wronsks()[1](1,3,-.02275)
 
 
 #w, vol, color_data, mag_data, coord_range_vects_with_valid_domain, function_outs, coord_and_func_outs = scalar_3D_plot([np.arange(-.5,.6,.1),np.arange(-.5,.6,.1),np.arange(-.5,.6,.1)], out_func)
-sph_w, sph_vol, sph_color_data, sph_mag_data, sph_coord_range_vects_with_valid_domain, sph_function_outs, sph_coord_and_func_outs = scalar_3D_plot([np.arange(0,5,1),np.arange(0,2*math.pi,1),np.arange(0,math.pi,1)], out_func, coord_system_of_ranges='spherical')
+sph_w, sph_vol, sph_color_data, sph_mag_data, sph_coord_range_vects_with_valid_domain, sph_function_outs, sph_coord_and_func_outs = scalar_3D_plot([np.arange(0,.1,.001),np.arange(0,2*math.pi,1),np.arange(0,math.pi,1)], out_func, coord_system_of_ranges='spherical')
 
 print("done!")
 #w.show()

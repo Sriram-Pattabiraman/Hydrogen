@@ -1492,11 +1492,13 @@ def radial(boundary_epsilon=.0001, mid_r_start=1, mid_r_end=100, boundary_inf_ap
 
     #Num_D_Liouville_dx = .0001
 
+    #!!!very high mismatch value...for the correct eigenvalue.
     pool = joblib.Parallel(n_jobs=6, verbose=VERBOSITY, batch_size=4096)
+    breakpoint()
     baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r,q_of_r,w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=Num_D_Liouville_dx, disable_shooting_pbar=True, disable_coord_pbar=True, disable_pot_pbar=True, parallel_pool=pool)
-    #print("plotting")
-    #generic_plot(np.arange(-.0615,-0.0605,.0001), lambda e: mis_eigen(e)[1])
-    return mis_eigen(-.0625)[1]
+    print("plotting")
+    generic_plot(np.arange(-.0615,-0.0605,.0001), lambda e: mis_eigen(e)[1])
+    return mis_eigen(-.0625)[0]
 
 
     #stable_roots = lambda index: find_stable_roots_in_mis_and_cpm_prufer(mis_eigen, index)
