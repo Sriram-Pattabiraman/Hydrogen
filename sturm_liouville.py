@@ -50,7 +50,7 @@ Sometimes, and for the programmed prufer implementation, p, q or w [for us q] >0
 '''
 
 
-def NumD(f, dx, cmp_step=True): #returns NUMericalDerivatives using the complex step method, with finite difference method as a fallback for higher orders.
+def NumD(f, dx, cmp_step=False): #returns NUMericalDerivatives using the complex step method, with finite difference method as a fallback for higher orders.
     if cmp_step:
         def f_prime(x):
             try:
@@ -261,7 +261,7 @@ def LSLP_FD2(lambda_, p_x, q_x, w_x, dp__dx_x, y_x, dy__dx_x): #LSLP is Lambda S
 
 def Solve_LSLP_IVP(lambda_, p, q, w, x_init, y_init, dy__dx_init, x_end, dx, parallel_pool=None, store_solution=False): #for goodest results, dx should divide x_end-x_init #quadratic approximation, aka updates y at each time step as y + dy/dx dx + 1/2 d^2y/dx^2 dx^2
     x, y, dy__dx = x_init, y_init, dy__dx_init
-    dp__dx = NumD(p, dx, cmp_step=True)
+    dp__dx = NumD(p, dx, cmp_step=True) #cmp_step=True
     zero_count = 0
     if store_solution:
         point_list = []
@@ -1122,6 +1122,7 @@ def find_stable_roots_in_mis_and_cpm_prufer(mis_and_cpm_prufer, target_index, sa
     verified_roots = []
     print("Testing Candidate Roots...")
     for candidate_root in tqdm(candidate_roots):
+        print(f"Testing {candidate_root}")
         #breakpoint()
         if abs(candidate_root[0]) != np.inf and ("no_root_found" not in candidate_root[2]):
             if abs(mis(candidate_root[0])) < sanity_check_tol:
