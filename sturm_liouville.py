@@ -393,6 +393,7 @@ def full_shot_from_start_and_end(start_shot_vector, end_shot_vector): #for schro
     return full_shot_vector
 
 def bake_potentials_into_mesh(potential, baked_mesh, indep_var_mesh_key="mesh", disable_pbar=False): #is an inplace function #takes a baked_mesh, and outputs a baked_mesh with the potentials.
+    #!!!find a way to parralelize this.     
     #baked so that the potential on the interval is stored at the left endpoint indice. the rightmost endpoint simply gets the potential value there as an approximation - the rest are averages of the potential at the endpoints.
     if type(baked_mesh) == dict: #it's a baked mesh
         length = len(baked_mesh[indep_var_mesh_key])
@@ -711,7 +712,9 @@ def Step_Prufer_Right_Backward(baked_mesh, current_prufer_right, prev_intra_loop
         return new_total_prufer_left, final_left_angle,
 
 
-def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vector, lambda_, indep_var_mesh_key="mesh", matching_point_index=None, disable_delta_forward_baking_pbar=True, disable_prop_baking_pbar=True, disable_shooting_pbar=False, disable_local_scaling_factors_baking_pbar=True, store_solution=False, parallel_pool=None): #takes in the prop_mats for a schrodinger problem and the full_shot_vector is the initial shot at both endpoints giving left then right in a single vector. baked_mesh has a bunch of information, including the mesh itself, and is a dictionary so that i don't forget what the things are. #!!!stubby top down code this stuff.
+def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vector, lambda_, indep_var_mesh_key="mesh", indep_var_mesh_key_for_history_override=None, matching_point_index=None, disable_delta_forward_baking_pbar=True, disable_prop_baking_pbar=True, disable_shooting_pbar=False, disable_local_scaling_factors_baking_pbar=True, store_solution=False, parallel_pool=None): #takes in the prop_mats for a schrodinger problem and the full_shot_vector is the initial shot at both endpoints giving left then right in a single vector. baked_mesh has a bunch of information, including the mesh itself, and is a dictionary so that i don't forget what the things are. #!!!stubby top down code this stuff.
+    if indep_var_mesh_key_for_history_override is None:
+        indep_var_mesh_key_for_history_override = indep_var_mesh_key
     if parallel_pool is None:
         parallel_pool = joblib.Parallel(n_jobs=6, verbose=VERBOSITY, batch_size=4096)
     #!!!implement energy derivative tracking for newton's method
@@ -750,7 +753,7 @@ def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vecto
         print("Shooting...")
 
     if store_solution:
-        history_left, history_right = [current_left_shot_vector], [current_right_shot_vector]
+        history_left, history_right = [np.array([baked_mesh[indep_var_mesh_key_for_history_override][0], *current_left_shot_vector])], [np.array([baked_mesh[indep_var_mesh_key_for_history_override][-1], *current_right_shot_vector])]
     with tqdm(total=max(matching_point_index-left_index, right_index-matching_point_index), disable=disable_shooting_pbar) as pbar:
         while left_index < matching_point_index and right_index > matching_point_index:
             #print('prufers:',end='')
@@ -764,7 +767,7 @@ def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vecto
                 current_left_shot_vector = next_left_shot_vector
                 current_prufer_left = next_prufer_left
                 if store_solution:
-                    history_left.append(current_left_shot_vector)
+                    history_left.append(np.array([baked_mesh[indep_var_mesh_key_for_history_override][left_index], *current_left_shot_vector]))
 
             if right_index > matching_point_index:
                 next_right_shot_vector = np.dot(baked_mesh["prop_mat_backward_mesh"][logical_index], current_right_shot_vector)
@@ -773,7 +776,7 @@ def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vecto
                 current_right_shot_vector = next_right_shot_vector
                 current_prufer_right = next_prufer_right
                 if store_solution:
-                    history_right.append(current_right_shot_vector)
+                    history_right.append(np.array([baked_mesh[indep_var_mesh_key_for_history_override][right_index], *current_right_shot_vector]))
 
             left_index += 1
             logical_index += 1
@@ -955,7 +958,7 @@ def CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot
     #r_mesh is now a double_coordinate_mesh baked with potentials
     def mis(lambda_):
         with parallel_pool as pool:
-            return CPM_Method_Shoot_And_Mismatch(pot_of_x_baked_double_coordinate_mesh, init_left_shot_vector, init_right_shot_vector, lambda_, indep_var_mesh_key="x_mesh", matching_point_index=None, disable_delta_forward_baking_pbar=True, disable_prop_baking_pbar=True, disable_shooting_pbar=disable_shooting_pbar, disable_local_scaling_factors_baking_pbar=disable_local_scaling_factors_baking_pbar, store_solution=store_solution, parallel_pool=pool)
+            return CPM_Method_Shoot_And_Mismatch(pot_of_x_baked_double_coordinate_mesh, init_left_shot_vector, init_right_shot_vector, lambda_, indep_var_mesh_key="x_mesh", indep_var_mesh_key_for_history_override='r_mesh', matching_point_index=None, disable_delta_forward_baking_pbar=True, disable_prop_baking_pbar=True, disable_shooting_pbar=disable_shooting_pbar, disable_local_scaling_factors_baking_pbar=disable_local_scaling_factors_baking_pbar, store_solution=store_solution, parallel_pool=pool)
     return pot_of_x_baked_double_coordinate_mesh, mis
 #works for azimuthal (magnetic quantum numbers), polar (azimuthal quantum numbers), radial. prufer not so much - not at all monotonic sometimes.for radial problem, has dips at eigen values possibly?
 
@@ -1464,7 +1467,7 @@ def polar():
     generic_plot(np.arange(-1,27,.1),lambda l: mis_eigen_0(l)[1])
 
 #radial
-def radial(boundary_epsilon=.0001, mid_r_start=1, mid_r_end=100, boundary_inf_approx=1000, mesh_dr_start=.00001, mesh_dr_mid=.001, mesh_dr_end=.01, Num_D_Liouville_dx=.0001):
+def radial(boundary_epsilon=.0001, mid_r_start=1, mid_r_end=999, boundary_inf_approx=1000, mesh_dr_start=.0001, mesh_dr_mid=.01, mesh_dr_end=.0001, Num_D_Liouville_dx=.0001):
     electron_mass, proton_mass = constants.electron_mass, constants.proton_mass
     reduced_mass = electron_mass*proton_mass/(electron_mass+proton_mass)
     electron_charge = constants.elementary_charge
@@ -1495,10 +1498,16 @@ def radial(boundary_epsilon=.0001, mid_r_start=1, mid_r_end=100, boundary_inf_ap
     #!!!very high mismatch value...for the correct eigenvalue.
     pool = joblib.Parallel(n_jobs=6, verbose=VERBOSITY, batch_size=4096)
     breakpoint()
-    baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r,q_of_r,w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=Num_D_Liouville_dx, disable_shooting_pbar=True, disable_coord_pbar=True, disable_pot_pbar=True, parallel_pool=pool)
-    print("plotting")
-    generic_plot(np.arange(-.0615,-0.0605,.0001), lambda e: mis_eigen(e)[1])
-    return mis_eigen(-.0625)[0]
+    disable_shooting_pbar = False
+    disable_coord_pbar = False
+    disable_pot_pbar = False
+    baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r,q_of_r,w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=Num_D_Liouville_dx, disable_shooting_pbar=disable_shooting_pbar, disable_coord_pbar=disable_coord_pbar, disable_pot_pbar=disable_pot_pbar, store_solution=True, parallel_pool=pool)
+    #print("plotting")
+    #generic_plot(np.arange(-.0615,-0.0605,.0001), lambda e: mis_eigen(e)[1])
+    eig_out = mis_eigen(-.0625)
+    plot_data = eig_out[2]
+    plot_data = np.array(plot_data)
+    return baked_mesh,  mis_eigen #mis_eigen(-.0625)[1]
 
 
     #stable_roots = lambda index: find_stable_roots_in_mis_and_cpm_prufer(mis_eigen, index)

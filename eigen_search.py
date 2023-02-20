@@ -331,19 +331,19 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
 
     boundary_epsilon_radial = .0001
     mid_r_start = 1
-    mid_r_end = 100
+    mid_r_end = 999
     boundary_inf_approx = 1000
     #p_of_r,q_of_r,w_of_r = lambda x: x**2, lambda x: l*(l+1) - ( ((2*reduced_mass*(x**2))/(hbar**2)) * ((electron_charge**2)/(4*math.pi*vaccuum_permittivity*x))  ), lambda x: ((2*reduced_mass*(x**2))/(hbar**2))
     r_problem_given_theta_eig = lambda *prev_coord_eigens: [lambda x: 1, lambda x: prev_coord_eigens[1]/(x**2) - (1/x), lambda x: 1]
-    mesh_dr_start = .001
-    mesh_dr_mid = .001
-    mesh_dr_end = .1
+    mesh_dr_start = .0001
+    mesh_dr_mid = .01
+    mesh_dr_end = .0001
     r_mesh_start = np.arange(boundary_epsilon_radial, mid_r_start, mesh_dr_start)
     r_mesh_mid = np.arange(mid_r_start, mid_r_end, mesh_dr_mid)
     r_mesh_end = np.arange(mid_r_end, boundary_inf_approx, mesh_dr_end)
     r_mesh = np.concatenate([r_mesh_start, r_mesh_mid, r_mesh_end])
     Num_D_Liouville_dx = .0001
-    lazy_small_number = .001
+    lazy_small_number = .0001
     baked_radial_mesh_given_theta_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*r_problem_given_theta_eig(*prev_coord_eigens), r_mesh, dx=lazy_small_number)
     which_basis_init_vector = which_basis_init_wronsks[2]
     bisect_tol = .0001
@@ -353,15 +353,14 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     eigen_funcs_for_each_coord = [azi_eigen_func_given_eigen, theta_eigen_func_given_azi_eig, radial_eigen_func_given_theta_eig]
     vector_eigen_func = Make_Make_Total_Eigen_Func_Given_Eigens_Given_Component_Eigen_Funcs(eigen_funcs_for_each_coord)
     breakpoint()
-    vector_eigen_func(1,3,-.02275)(1,1,1)
+    #vector_eigen_func(0,2,-.0625)(1,1,1)
     #eigen_func_for_each_coord = lambda azi_eig, theta_eig, radial_eig: [azi_eigen_func_given_eigen_b1(azi_eig), theta_eigen_func_given_azi_eig_b1(azi_eig)(theta_eig), radial_eigen_func_given_theta_eig_b1(azi_eig, theta_eig)(radial_eig)]
     #prod_func = lambda azi_eig, theta_eig, radial_eig: [eigen_func_for_each_coord(azi_eig, theta_eig, radial_eig)]
     
-    #!!!monkey patch!
-    radial_eigen_func_given_theta_eig = lambda *prev_coord_eigens: 1*[]
-    eigens_for_each_coord = [azi_eigens, theta_eigens_given_azi_eig, radial_eigens_given_theta_eig]
+    #!!!eigens_for_each_coord = [azi_eigens, theta_eigens_given_azi_eig, radial_eigens_given_theta_eig]
     breakpoint()
-    coord_eigens = unravel_eigens(eigens_for_each_coord)
+    #!!!coord_eigens = unravel_eigens(eigens_for_each_coord)
+    coord_eigens="Placeholder"
     #breakpoint()
     return coord_eigens, vector_eigen_func
 
@@ -376,12 +375,12 @@ def listify_meshgrids_and_remove_zeros(X, Y, Z, C): #!!! here and earlier, find 
     return newx, newy, newz, newc
 
 #breakpoint()
-out_func = vector_eigen_for_choice_of_basis_init_wronsks()[1](1,3,-.02275)
+out_func = vector_eigen_for_choice_of_basis_init_wronsks()[1](0,2,-.0625)
 #out_val = out_func(1,1,1)
 
 
-#w, vol, color_data, mag_data, coord_range_vects_with_valid_domain, function_outs, coord_and_func_outs = scalar_3D_plot([np.arange(-.5,.6,.1),np.arange(-.5,.6,.1),np.arange(-.5,.6,.1)], out_func)
-sph_w, sph_vol, sph_color_data, sph_mag_data, sph_coord_range_vects_with_valid_domain, sph_function_outs, sph_coord_and_func_outs = scalar_3D_plot([np.arange(0,.1,.001),np.arange(0,2*math.pi,1),np.arange(0,math.pi,1)], out_func, coord_system_of_ranges='spherical')
+w, vol, color_data, mag_data, coord_range_vects_with_valid_domain, function_outs, coord_and_func_outs = scalar_3D_plot([np.arange(-.5,.6,.1),np.arange(-.5,.6,.1),np.arange(-.5,.6,.1)], out_func)
+#sph_w, sph_vol, sph_color_data, sph_mag_data, sph_coord_range_vects_with_valid_domain, sph_function_outs, sph_coord_and_func_outs = scalar_3D_plot([np.arange(0,2*math.pi,1),np.arange(0,math.pi,1),np.arange(0,1,.1)], out_func, coord_system_of_ranges='spherical')
 
 print("done!")
 #w.show()
