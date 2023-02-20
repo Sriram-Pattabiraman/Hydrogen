@@ -285,7 +285,7 @@ def scalar_3D_plot(coord_ranges, scalar_func, color_func=lambda normed_val: np.a
 
     #breakpoint()
     #glvw = gl.GLViewWidget()
-    #vol = gl.GLVolumeItem(color_data, sliceDensity=10)
+    #vol = gl.GLVolumeItem(color_data, sliceDensity=1)
     #glvw.addItem(vol)
     glvw, vol = None, None #!!!todo - fixy fix
     return glvw, vol, color_data, mag_data, coord_range_vects_with_valid_domain, function_outs, coord_and_func_outs
@@ -352,13 +352,13 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
 
     eigen_funcs_for_each_coord = [azi_eigen_func_given_eigen, theta_eigen_func_given_azi_eig, radial_eigen_func_given_theta_eig]
     vector_eigen_func = Make_Make_Total_Eigen_Func_Given_Eigens_Given_Component_Eigen_Funcs(eigen_funcs_for_each_coord)
-    breakpoint()
+    #breakpoint()
     #vector_eigen_func(0,2,-.0625)(1,1,1)
     #eigen_func_for_each_coord = lambda azi_eig, theta_eig, radial_eig: [azi_eigen_func_given_eigen_b1(azi_eig), theta_eigen_func_given_azi_eig_b1(azi_eig)(theta_eig), radial_eigen_func_given_theta_eig_b1(azi_eig, theta_eig)(radial_eig)]
     #prod_func = lambda azi_eig, theta_eig, radial_eig: [eigen_func_for_each_coord(azi_eig, theta_eig, radial_eig)]
     
     #!!!eigens_for_each_coord = [azi_eigens, theta_eigens_given_azi_eig, radial_eigens_given_theta_eig]
-    breakpoint()
+    #breakpoint()
     #!!!coord_eigens = unravel_eigens(eigens_for_each_coord)
     coord_eigens="Placeholder"
     #breakpoint()
@@ -375,11 +375,11 @@ def listify_meshgrids_and_remove_zeros(X, Y, Z, C): #!!! here and earlier, find 
     return newx, newy, newz, newc
 
 #breakpoint()
-out_func = vector_eigen_for_choice_of_basis_init_wronsks()[1](0,2,-.0625)
+out_func = vector_eigen_for_choice_of_basis_init_wronsks()[1](0,0,-.0625)
 #out_val = out_func(1,1,1)
 
 
-w, vol, color_data, mag_data, coord_range_vects_with_valid_domain, function_outs, coord_and_func_outs = scalar_3D_plot([np.arange(-.5,.6,.1),np.arange(-.5,.6,.1),np.arange(-.5,.6,.1)], out_func)
+w, vol, color_data, mag_data, coord_range_vects_with_valid_domain, function_outs, coord_and_func_outs = scalar_3D_plot([np.arange(-2,2,.1),np.arange(-2,2,.1),np.arange(-2,2,.1)], out_func)
 #sph_w, sph_vol, sph_color_data, sph_mag_data, sph_coord_range_vects_with_valid_domain, sph_function_outs, sph_coord_and_func_outs = scalar_3D_plot([np.arange(0,2*math.pi,1),np.arange(0,math.pi,1),np.arange(0,1,.1)], out_func, coord_system_of_ranges='spherical')
 
 print("done!")
