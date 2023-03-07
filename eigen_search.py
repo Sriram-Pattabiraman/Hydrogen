@@ -19,6 +19,7 @@ from interleaver import Interleave
 from scipy import constants
 
 import pyqtgraph as pg
+import matplotlib.pyplot as plt
 '''
 import IPython
 #if this is an ipy, start the qt5 event loop
@@ -61,12 +62,12 @@ def Solve_For_Eigens(problem_funcs, x_start=None, x_end=None, baked_x_mesh_overr
     return eigens
 
 def Make_Eigen_Func_Given_Eigen(problem_funcs, x_start, x_end, dx=.0001, which_basis_init_vector=0, parallel_pool=None):
-    basis_init_vectors = [0,1], [1,0]
 
     if parallel_pool is None:
         parallel_pool = joblib.Parallel(n_jobs=6, verbose=VERBOSITY, batch_size=4096)
 
     def Eigen_Func_Given_Eigen(lambda_, which_basis_init_vector=which_basis_init_vector, parallel_pool=parallel_pool):
+        basis_init_vectors = [0,1], [1,0]
         with parallel_pool as pool:
             return sl.Solve_LSLP_IVP(lambda_, *problem_funcs, x_start, *basis_init_vectors[which_basis_init_vector], x_end, dx, parallel_pool=pool, store_solution=True)[3]
     return Eigen_Func_Given_Eigen
@@ -93,10 +94,26 @@ def unravel_eigens(eigens_for_each_coord, parallel_pool=None): #this function lo
         states = new_states
 
 def find_surrounding_indice_in_mono_arr(val, arr, use_ends_of_arr_if_not_in_arr=True):
+    if val <= arr[0]:
+        if use_ends_of_arr_if_not_in_arr:
+            return [0, 0]
+        else:
+            raise ValueError("Val not in arr!")
+    elif arr[-1] < val:
+        if use_ends_of_arr_if_not_in_arr:
+            return [len(arr)-1, len(arr)-1]
+        else:
+            raise ValueError("Val not in arr!")
+    else:
+        i = np.searchsorted(arr, val, side="left")
+        return (i-1, i)
+    
+'''
+def find_surrounding_indice_in_mono_arr(val, arr, use_ends_of_arr_if_not_in_arr=True):
     for i in range(len(arr)):
         arr_val = arr[i]
         if i == 0:
-            if val < arr_val:
+            if val <= arr_val:
                 if use_ends_of_arr_if_not_in_arr:
                     return [0, 0]
                 else:
@@ -109,6 +126,7 @@ def find_surrounding_indice_in_mono_arr(val, arr, use_ends_of_arr_if_not_in_arr=
             return [len(arr)-1, len(arr)-1]
         else:
             raise ValueError("Val not in arr!")
+'''
 
 def find_indices_given_coords(coords, arrs):
     return [find_surrounding_indice_in_mono_arr(coords[i], arrs[i]) for i in range(len(coords))]
@@ -135,6 +153,21 @@ def interp(dim, points, time_vector, points_indice=0, base_interp=lerp):
         return base_interp(time_vector[dim-1], int_0, int_1)
     elif dim == 1:
         return base_interp(time_vector[0], points[points_indice], points[points_indice+1])
+
+def interp_in_coord_out_arr(coord_out_arr):
+    if type(coord_out_arr) != np.ndarray:
+        coord_out_arr = np.array(coord_out_arr)
+    
+    def out_interp(coord):
+        surrounding_indices_func = find_indices_given_coords([coord], [coord_out_arr[:,0]])[0]
+        left_coord, left_val = coord_out_arr[surrounding_indices_func[0]]
+        right_coord, right_val = coord_out_arr[surrounding_indices_func[1]]
+        if right_coord - left_coord == 0:
+            return left_val
+        else:
+            time = (coord - left_coord) / (right_coord - left_coord)
+        return lerp(time, left_val, right_val)
+    return out_interp
 
 def Make_Make_Total_Eigen_Func_Given_Eigens_Given_Component_Eigen_Funcs(eigen_funcs_for_each_coord, total_out_given_components=lambda comps: np.prod(comps)):
     eigen_funcs_for_each_coord = np.array(eigen_funcs_for_each_coord)
@@ -199,7 +232,7 @@ def convert_coord(in_coord, from_system='cartesian', out_system='spherical'):
             return None
         return [r, theta, phi]
 
-def scalar_3D_plot(coord_ranges, scalar_func, color_func=lambda normed_val: np.array(colormaps.ScalarMappable(cmap='Blues').to_rgba(normed_val, alpha=1, norm=False))*255, coord_system_of_ranges='cartesian', coord_system_of_func='spherical', func_args_as_direct_vect_arr=False):
+def scalar_3D_plot(coord_ranges, scalar_func, color_func=lambda normed_val: np.array(colormaps.ScalarMappable(cmap='Blues').to_rgba(normed_val, alpha=1, norm=False))*255, coord_system_of_ranges='cartesian', coord_system_of_func='spherical', func_args_as_direct_vect_arr=False, make_opengl_graphic=False, make_color_data=False, make_mag_data=False):
     len1, len2, len3 = len(coord_ranges[0]), len(coord_ranges[1]), len(coord_ranges[2])
     total_length = len1*len2*len3
 
@@ -211,7 +244,8 @@ def scalar_3D_plot(coord_ranges, scalar_func, color_func=lambda normed_val: np.a
     pbar = tqdm(total=total_length, desc="3D Func Calculating...") #!!!parallelize this?
     try:
         for (i,j,k) in Interleave(list(itertools.product(list(range(len1)), list(range(len2)), list(range(len3))))):
-            print(f"Num of Good (not None or NaN): {len(function_outs)}")
+            if ( (i+1)*len2*len3 + (j+1)*len3 + (k+1) ) % 10000 == 0:
+                print(f"Num of Good (not None or NaN): {len(function_outs)}")
             in_coord = [coord_ranges[0][i], coord_ranges[1][j], coord_ranges[2][k]]
             func_in_coord = convert_coord(in_coord, from_system=coord_system_of_ranges, out_system=coord_system_of_func)
             if func_in_coord is None or np.isnan(func_in_coord).any():
@@ -274,21 +308,34 @@ def scalar_3D_plot(coord_ranges, scalar_func, color_func=lambda normed_val: np.a
     max_func_out = np.max(function_outs)
     min_func_out = np.min(function_outs)
     norm_val = lambda func_out: func_out#lambda func_out: (func_out - min_func_out)/(max_func_out - min_func_out)
-    color_data = np.zeros((len1, len2, len3, 4), dtype=np.uint8)
-    mag_data = np.zeros((len1, len2, len3), dtype=np.float64)
+    if make_color_data:
+        color_data = np.zeros((len1, len2, len3, 4), dtype=np.uint8)
+    if make_mag_data:
+        mag_data = np.zeros((len1, len2, len3), dtype=np.float64)
     for vect_n in range(len(coord_indices)):
         i,j,k = coord_indices[vect_n]
 
         normed_val = norm_val(function_outs[vect_n])
-        color_data[i,j,k] = color_func(normed_val)
-        mag_data[i,j,k] = normed_val
+        if make_color_data:
+            color_data[i,j,k] = color_func(normed_val)
+        if make_mag_data:
+            mag_data[i,j,k] = normed_val
 
     #breakpoint()
-    #glvw = gl.GLViewWidget()
-    #vol = gl.GLVolumeItem(color_data, sliceDensity=1)
-    #glvw.addItem(vol)
-    glvw, vol = None, None #!!!todo - fixy fix
-    return glvw, vol, color_data, mag_data, coord_range_vects_with_valid_domain, function_outs, coord_and_func_outs
+    if make_opengl_graphic:
+        glvw = gl.GLViewWidget()
+        vol = gl.GLVolumeItem(color_data, sliceDensity=1)
+        glvw.addItem(vol) #!!!todo - fixy fix
+    
+    out_list = []
+    if make_opengl_graphic:
+        out_list.extend([glvw, vol, color_data])
+    elif make_color_data:
+        out_list.append(color_data)
+    elif make_mag_data:
+        out_list.append(mag_data)
+    out_list.extend([coord_range_vects_with_valid_domain, function_outs, coord_and_func_outs])
+    return out_list
 
 
 def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,0]): #!!!generalize!
@@ -298,10 +345,10 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     bisect_tol = .001
     azi_mesh = np.arange(0, 2*math.pi, lazy_small_number)
     baked_azi_mesh = sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*azi_problem, azi_mesh, dx=lazy_small_number)
-    which_basis_init_vector = which_basis_init_wronsks[0]
+    which_basis_init_vector_0 = which_basis_init_wronsks[0]
     #breakpoint()
-    azi_eigens = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(azi_problem, baked_x_mesh_override=baked_azi_mesh, which_basis_init_vector=which_basis_init_vector, stop_at_candidate_roots_num_thresh=1, potentially_ad_hoc_start_eigen_index=1, dx=lazy_small_number, bisect_tol=bisect_tol, parallel_pool=parallel_pool)
-    azi_eigen_func_given_eigen = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(azi_problem, azi_mesh[0], azi_mesh[-1], which_basis_init_vector=which_basis_init_vector, dx=lazy_small_number*(10**-2))
+    azi_eigens = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(azi_problem, baked_x_mesh_override=baked_azi_mesh, which_basis_init_vector=which_basis_init_vector_0, stop_at_candidate_roots_num_thresh=1, potentially_ad_hoc_start_eigen_index=1, dx=lazy_small_number, bisect_tol=bisect_tol, parallel_pool=parallel_pool)
+    azi_eigen_func_given_eigen = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(azi_problem, azi_mesh[0], azi_mesh[-1], which_basis_init_vector=which_basis_init_vector_0, dx=lazy_small_number*(10**-2))
 
 
     #theta (azimuthal quantum numbers) equation
@@ -317,9 +364,9 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     bisect_tol = .001
     theta_mesh = np.concatenate(np.array([np.arange(boundary_epsilon_theta, mesh_theta_mid_left, mesh_dtheta_left), np.arange(mesh_theta_mid_left, mesh_theta_mid_right, mesh_dtheta_mid), np.arange(mesh_theta_mid_right, math.pi-boundary_epsilon_theta, mesh_dtheta_end)], dtype=object))
     baked_theta_mesh_given_azi_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*theta_problem_given_azi_eig(*prev_coord_eigens), theta_mesh, dx=lazy_small_number)
-    which_basis_init_vector = which_basis_init_wronsks[1]
-    theta_eigens_given_azi_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(theta_problem_given_azi_eig(*prev_coord_eigens), baked_x_mesh_override=baked_theta_mesh_given_azi_eig(*prev_coord_eigens), mesh_dx=lazy_small_number, which_basis_init_vector=which_basis_init_vector, stop_at_candidate_roots_num_thresh=1, potentially_ad_hoc_start_eigen_index=1, dx=lazy_small_number, bisect_tol=bisect_tol, get_eigens_up_to_n=3, parallel_pool=parallel_pool)
-    theta_eigen_func_given_azi_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(theta_problem_given_azi_eig(*prev_coord_eigens), theta_mesh[0], theta_mesh[-1], dx=lazy_small_number*(10**-2), which_basis_init_vector=which_basis_init_vector)
+    which_basis_init_vector_1 = which_basis_init_wronsks[1]
+    theta_eigens_given_azi_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(theta_problem_given_azi_eig(*prev_coord_eigens), baked_x_mesh_override=baked_theta_mesh_given_azi_eig(*prev_coord_eigens), mesh_dx=lazy_small_number, which_basis_init_vector=which_basis_init_vector_1, stop_at_candidate_roots_num_thresh=1, potentially_ad_hoc_start_eigen_index=1, dx=lazy_small_number, bisect_tol=bisect_tol, get_eigens_up_to_n=3, parallel_pool=parallel_pool)
+    theta_eigen_func_given_azi_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(theta_problem_given_azi_eig(*prev_coord_eigens), theta_mesh[0], theta_mesh[-1], dx=lazy_small_number*(10**-2), which_basis_init_vector=which_basis_init_vector_1)
 
 
     #radial
@@ -345,14 +392,45 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     Num_D_Liouville_dx = .0001
     lazy_small_number = .0001
     baked_radial_mesh_given_theta_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*r_problem_given_theta_eig(*prev_coord_eigens), r_mesh, dx=lazy_small_number)
-    which_basis_init_vector = which_basis_init_wronsks[2]
+    which_basis_init_vector_2 = which_basis_init_wronsks[2]
     bisect_tol = .0001
-    radial_eigens_given_theta_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(r_problem_given_theta_eig(*prev_coord_eigens), baked_x_mesh_override=baked_radial_mesh_given_theta_eig(*prev_coord_eigens), dx=Num_D_Liouville_dx, which_basis_init_vector=which_basis_init_vector, bisect_tol=bisect_tol, parallel_pool=parallel_pool)
-    radial_eigen_func_given_theta_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(r_problem_given_theta_eig(*prev_coord_eigens), r_mesh[0], r_mesh[-1], dx=mesh_dr_start, which_basis_init_vector=which_basis_init_vector)
+    radial_eigens_given_theta_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(r_problem_given_theta_eig(*prev_coord_eigens), baked_x_mesh_override=baked_radial_mesh_given_theta_eig(*prev_coord_eigens), dx=Num_D_Liouville_dx, which_basis_init_vector=which_basis_init_vector_2, bisect_tol=bisect_tol, parallel_pool=parallel_pool)
+    radial_eigen_func_given_theta_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(r_problem_given_theta_eig(*prev_coord_eigens), r_mesh[0], r_mesh[-1], dx=mesh_dr_start, which_basis_init_vector=which_basis_init_vector_2)
 
-    eigen_funcs_for_each_coord = [azi_eigen_func_given_eigen, theta_eigen_func_given_azi_eig, radial_eigen_func_given_theta_eig]
-    vector_eigen_func = Make_Make_Total_Eigen_Func_Given_Eigens_Given_Component_Eigen_Funcs(eigen_funcs_for_each_coord)
     #breakpoint()
+    for l in tqdm(range(0, 3)):
+        for m in tqdm(range(-l, l+1)):
+            azi_func = interp_in_coord_out_arr(azi_eigen_func_given_eigen()(m**2))
+            #breakpoint()
+            theta_func = interp_in_coord_out_arr(theta_eigen_func_given_azi_eig(m**2)(l*(l+1)))
+            #breakpoint()
+            hopefully_real_sph_harm = lambda phi, theta: azi_func(phi) * theta_func(theta)
+            data_for_r_sph = []
+            x_min, x_max, y_min, y_max = 0, 2*math.pi, 0, math.pi
+            for i in np.arange(0, 2*math.pi, .1):
+                sub=[]
+                for j in np.arange(0, 1*math.pi, .1):
+                    sub.append(hopefully_real_sph_harm(i,j))
+                data_for_r_sph.append(sub)
+            data_for_r_sph = np.array(data_for_r_sph)
+            data_for_r_sph = data_for_r_sph.transpose()
+            data_for_r_sph = np.flip(data_for_r_sph, axis=0)
+            np.delete(data_for_r_sph, 0, 0)
+            fig, ax = plt.subplots()
+            axImage = ax.imshow(data_for_r_sph, extent=[x_min, x_max, y_min, y_max], cmap='viridis')
+            fig.colorbar(axImage, ax=ax)
+            fig.savefig(f"Images/Hopefully_Correct_Real_Spherical_Harmonics__init={which_basis_init_wronsks[0]}_{which_basis_init_wronsks[1]}/l={l}_m={m}")
+            plt.close()
+    
+    
+    
+    
+    
+    eigen_funcs_for_each_coord = [azi_eigen_func_given_eigen, theta_eigen_func_given_azi_eig, radial_eigen_func_given_theta_eig]
+    
+    
+    #breakpoint()
+    vector_eigen_func = Make_Make_Total_Eigen_Func_Given_Eigens_Given_Component_Eigen_Funcs(eigen_funcs_for_each_coord)
     #vector_eigen_func(0,2,-.0625)(1,1,1)
     #eigen_func_for_each_coord = lambda azi_eig, theta_eig, radial_eig: [azi_eigen_func_given_eigen_b1(azi_eig), theta_eigen_func_given_azi_eig_b1(azi_eig)(theta_eig), radial_eigen_func_given_theta_eig_b1(azi_eig, theta_eig)(radial_eig)]
     #prod_func = lambda azi_eig, theta_eig, radial_eig: [eigen_func_for_each_coord(azi_eig, theta_eig, radial_eig)]
@@ -374,13 +452,17 @@ def listify_meshgrids_and_remove_zeros(X, Y, Z, C): #!!! here and earlier, find 
             point_indice += 1
     return newx, newy, newz, newc
 
+vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,0]) 
+vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,1,0]) 
+vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,0,0]) 
+vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,1,0]) 
 #breakpoint()
-out_func = vector_eigen_for_choice_of_basis_init_wronsks()[1](0,0,-.0625)
+#out_func = vector_eigen_for_choice_of_basis_init_wronsks()[1](0,0,-.0625)
 #out_val = out_func(1,1,1)
 
 
-w, vol, color_data, mag_data, coord_range_vects_with_valid_domain, function_outs, coord_and_func_outs = scalar_3D_plot([np.arange(-2,2,.1),np.arange(-2,2,.1),np.arange(-2,2,.1)], out_func)
-#sph_w, sph_vol, sph_color_data, sph_mag_data, sph_coord_range_vects_with_valid_domain, sph_function_outs, sph_coord_and_func_outs = scalar_3D_plot([np.arange(0,2*math.pi,1),np.arange(0,math.pi,1),np.arange(0,1,.1)], out_func, coord_system_of_ranges='spherical')
+#out_list = scalar_3D_plot([np.arange(-2,2,.1),np.arange(-2,2,.1),np.arange(-2,2,.1)], out_func)
+#out_list = scalar_3D_plot([np.arange(0,2*math.pi,1),np.arange(0,math.pi,1),np.arange(0,1,.1)], out_func, coord_system_of_ranges='spherical')
 
 print("done!")
 #w.show()
@@ -395,3 +477,5 @@ X,Y,Z = np.mgrid[:11,:11,:11]
 ax.scatter(X, Y, Z, c=mag_data.ravel(), cmap=plt.get_cmap("Greys"), depthshade=True)
 fig.add_axes(ax)
 '''
+
+
