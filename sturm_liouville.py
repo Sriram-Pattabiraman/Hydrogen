@@ -25,6 +25,7 @@ app =  pg.Qt.mkQApp()
 
 import math
 import numpy as np
+import scipy as sp
 from scipy import constants
 
 import itertools
@@ -259,11 +260,34 @@ def Monotone_Root_Find(f, x_0, tolerance, initial_step=1, adjusting_factor=2): #
 def LSLP_FD2(lambda_, p_x, q_x, w_x, dp__dx_x, y_x, dy__dx_x): #LSLP is Lambda Sturm-Liouville Problem aka lambda is given. #returns the finite 2nd order difference as a function of lambda_, y_x, and dy__dx_x; where p_x,q_x,y_x are p(x),q(x),y(x) evaluated at x (think of solving an IVP using Euler's method)
     return (-lambda_*w_x*y_x + q_x*y_x - dp__dx_x * dy__dx_x)/p_x #hopefully i did my algebra right. if i did, then this is d^2y/dx^2
 
-def Solve_LSLP_IVP(lambda_, p, q, w, x_init, y_init, dy__dx_init, x_end, dx, parallel_pool=None, store_solution=False): #for goodest results, dx should divide x_end-x_init #quadratic approximation, aka updates y at each time step as y + dy/dx dx + 1/2 d^2y/dx^2 dx^2
-    x, y, dy__dx = x_init, y_init, dy__dx_init
+def exponential_fit(point_list):
+    if type(point_list) != np.ndarray:
+        point_list = np.array(point_list)
+    a,b = sp.optimize.curve_fit(lambda r,a,b: a*math.e**(b*r), point_list[:,0], point_list[:,1])[0]
+    return lambda r: a*math.e**(b*r)
+
+def exponential_over_r_fit(point_list):
+    if type(point_list) != np.ndarray:
+        point_list = np.array(point_list)
+    a,b = sp.optimize.curve_fit(lambda r,a,b: a*math.e**(b*r)/r, point_list[:,0], point_list[:,1])[0]
+    return lambda r: a*math.e**(b*r)/r
+
+#!!!use parareal
+def Solve_LSLP_IVP(lambda_, p, q, w, x_init, y_init, dy__dx_init, x_end, dx, asymptotic_fitting_n=10000, asymptotic_start_thresh=16, asymptotic_clamping=False, parallel_pool=None, disable_pbar=False, store_solution=False): #for goodest results, dx should divide x_end-x_init #quadratic approximation, aka updates y at each time step as y + dy/dx dx + 1/2 d^2y/dx^2 dx^2
+    x, y, dy__dx = x_init, y_init, dy__dx_init    
+    indep_var_displacement = 0
+    
+    if asymptotic_clamping is True:
+        asymptotic_clamper_fitter = exponential_fit
+    
+    fit_has_happened_already = False
+        
     dp__dx = NumD(p, dx, cmp_step=True) #cmp_step=True
     zero_count = 0
+    
     if store_solution:
+        point_list = []
+    elif asymptotic_clamping:
         point_list = []
 
     if dx<0:
@@ -271,14 +295,38 @@ def Solve_LSLP_IVP(lambda_, p, q, w, x_init, y_init, dy__dx_init, x_end, dx, par
     elif dx>0:
         continue_condition = lambda x: x<x_end
 
+    if not disable_pbar:
+        pbar = tqdm(desc="Simple IVP Solving...", total=((x_end-x_init)//dx)+1)
     while continue_condition(x):
         if store_solution:
             point_list.append((x,y))
+        elif asymptotic_clamping:
+            point_list.append((x,y))
+            if len(point_list) > asymptotic_fitting_n:
+                point_list.pop(0)
+                
+        if asymptotic_clamping and len(point_list) >= asymptotic_fitting_n and indep_var_displacement >= asymptotic_start_thresh and not fit_has_happened_already:
+            asymptotic_clamper = asymptotic_clamper_fitter(point_list[-asymptotic_fitting_n:])
+            fit_has_happened_already = True
+            
         d2y__dx2 = LSLP_FD2(lambda_, p(x), q(x), w(x), dp__dx(x), y, dy__dx)
         x_new, y_new, dy__dx_new = x+dx, y+dy__dx*dx+.5*d2y__dx2*(dx**2), dy__dx + d2y__dx2*dx
+        indep_var_displacement = x_new - x_init
+        if asymptotic_clamping and fit_has_happened_already:
+            predicted_val = asymptotic_clamper(x_new)
+            y_sign = 1 if y > 0 else (-1 if y < 0 else 0)
+            if abs(y_new) > abs(predicted_val):
+                y_new = y_sign * predicted_val
+                dy__dx_new = (y_new-y) / dx
+        
         if (y_new < 0 and y > 0) or (y < 0 and y_new > 0):
             zero_count += 1 #by IVT
+        
         x, y, dy__dx = x_new, y_new, dy__dx_new
+        
+        if not disable_pbar:
+            pbar.update()
+        
 
     if store_solution:
         return y, dy__dx, zero_count, point_list
@@ -982,7 +1030,7 @@ def check_stable_part_of_unstable_monotone(unstable_monotone, x_val_to_test, sus
 
 
 
-def find_candidate_roots(tailored_prufer, displacement_mag_quit_thresh=50, stop_at_candidate_roots_num_thresh=3, stop_at_total_steps_total_thresh=100, stop_at_total_steps_per_root_thresh=10, subsequent_root_agreement_tol=.001, interval_tol=.001, mis_val_tol=.01, start_val=0, start_direction="right", start_step_mag=.001, step_mag_increase_factor=2, sustained_monotone_radius_factor_as_ratio_of_prev_step=.1, uni_directional_sustained_monotone_step_sample_count=2, sustained_monotone_success_sample_thresh=.75, fake_root_restart_movement_factor_as_ratio_of_start_step=1): #mis_and_cpm_prufer_mis is a func taking lambda_ and outputting [mismatch, eigen_index]
+def find_candidate_roots(tailored_prufer, displacement_mag_quit_thresh=30, stop_at_candidate_roots_num_thresh=3, stop_at_total_steps_total_thresh=100, stop_at_total_steps_per_root_thresh=10, subsequent_root_agreement_tol=.001, interval_tol=.001, mis_val_tol=.01, start_val=0, start_direction="right", start_step_mag=.001, step_mag_increase_factor=2, sustained_monotone_radius_factor_as_ratio_of_prev_step=.1, uni_directional_sustained_monotone_step_sample_count=2, sustained_monotone_success_sample_thresh=.75, fake_root_restart_movement_factor_as_ratio_of_start_step=1): #mis_and_cpm_prufer_mis is a func taking lambda_ and outputting [mismatch, eigen_index]
     #breakpoint()
     total_steps_total = 0
     current_interval = [-np.inf, np.inf]
@@ -992,8 +1040,7 @@ def find_candidate_roots(tailored_prufer, displacement_mag_quit_thresh=50, stop_
     prev_direction = start_direction
     total_steps_for_this_root = 0
     candidate_roots = []
-    print("Finding Candidate Roots...")
-    pbar = tqdm(total=stop_at_total_steps_total_thresh)
+    pbar = tqdm(desc="Finding Candidate Roots...", total=stop_at_total_steps_total_thresh)
     while total_steps_total < stop_at_total_steps_total_thresh and len(candidate_roots) < stop_at_candidate_roots_num_thresh:
         #breakpoint()
         #find a candidate root
@@ -1065,7 +1112,7 @@ def find_candidate_roots(tailored_prufer, displacement_mag_quit_thresh=50, stop_
             total_steps_total += 1
             pbar.update()
 
-        else: #else in the while means that this branch executes if the condition in the while is false but not if there was a break statement.#one of the total step threshes has been exceeded #!!!code this
+        else: #else in the while means that this branch executes if the condition in the while is false but not if there was a break statement.#one of the total step threshes has been exceeded
             if total_steps_total >= stop_at_total_steps_total_thresh:
                 if curr_pruf_val < 0:
                     print("total_steps_total exceeded stop_at_total_steps_total_thresh!")
@@ -1174,17 +1221,6 @@ def find_first_n_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, up_to_n_eigens
     return out_list
 
 
-def find_first_n_eigen_vals_given_original_boundary_conditions_prufer(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx, up_to_n_eigens, tolerance, custom_eigen_list=False, initial_guess_0=0, initial_step=1, adjusting_factor=2):
-    #!!!use this...
-    Prufer_Mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-    eigensAndErrors = find_first_n_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, up_to_n_eigens, tolerance, custom_eigen_list=custom_eigen_list, initial_guess_0=initial_guess_0, initial_step=initial_step, adjusting_factor=adjusting_factor)
-
-    return eigensAndErrors
-
-def find_eigen_funcs_given_eigen_vals(lambda_list, p, q, w, x_init, y_init, dy__dx_init, x_end, dx):
-    return map(lambda lambda_: Solve_LSLP_IVP(lambda_, p, q, w, x_init, y_init, dy__dx_init, x_end, dx, store_solution=True)[3], lambda_list)
-
-
 def boundary_conditions_to_shooters(conditions, mode="periodic"): #takes in some form of boundary conditions and outputs the shooter conditions. the solutions to the shooters for a given eigenvalue are a basis for the eigenspace of that eigenvalue. i'm pretty sure that's right. hopefully they do indeed have the same eigenvalue...
     if mode=="periodic":
         #conditions = [x_a, x_b]
@@ -1194,23 +1230,6 @@ def boundary_conditions_to_shooters(conditions, mode="periodic"): #takes in some
         shooters1 = conditions[0], 1, 0, conditions[1], 1, 0 #this is one normalized initial condition vector in the basis
         shooters2 = conditions[0], 0, 1, conditions[1], 0, 1 #this is the other.
         return shooters1, shooters2
-
-def particular_spanning_solutions_to_general(y_1, y_2, dx): #!!!use this
-    #so if y_1(a) = 1 and y'_1(a) = 0 and y_2(a) = 0 and y'_2(a) = 1 aka if we have really nice initial condition vectors spanning the thingy, then
-    #y = c_1y_1 + c_2y_2 can be solved to get y(a) = c_1 and y'(a) = c_2
-    dy_1__dx = NumD(y_1, dx)
-    dy_2__dx = NumD(y_2, dx)
-    def general_to_single_particular(x_a, y_a, dy__dx_a): #!!!allow for more general conditions, like periodic conditions.
-        matrix = np.array([[y_1(x_a), y_2(x_a)], [dy_1__dx(x_a), dy_2__dx(x_a)]])
-        solution_operator = np.linalg.inv(matrix)
-        outVector = np.array([y_a, dy__dx_a])
-        c_vector = np.matmul(solution_operator, outVector)
-        def single_particular(x):
-            return np.dot(c_vector, np.array([y_1(x), y_2(x)]))
-
-        return single_particular
-
-    return general_to_single_particular
 
 
 
@@ -1310,7 +1329,7 @@ def plot_eigen_funcs(list_of_list_of_coords, eigen_vals, color_eigen_as_zero_pre
 #prufer tests
 
 '''
-#azimuth (magnetic quantum number) #!!!try this with wronsk = [1, 1j] and [-1j, 1] or similar [sols are complex for this equation]
+#azimuth (magnetic quantum number)
 p,q,w = lambda x:1, lambda x: 0, lambda x: 1 #azimuthal equation
 x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = boundary_conditions_to_shooters([0, 2*math.pi])[1]
 #d^2y/dx^2 = -\lambda y with periodic boundary conditions y(0)=y(2*\pi)=0. y'(0)=y'(2*\pi)=1 This is the equation for the azimuthal angle. The eigen_vals are the eigenvalues of -d^2/dx^2, and therefore the magnetic quantum number m=sqrt(\lambda)
@@ -1481,7 +1500,9 @@ def radial(boundary_epsilon=.0001, mid_r_start=1, mid_r_end=999, boundary_inf_ap
     #boundary_inf_approx = 1000
 
     #p_of_r,q_of_r,w_of_r = lambda x: x**2, lambda x: l*(l+1) - ( ((2*reduced_mass*(x**2))/(hbar**2)) * ((electron_charge**2)/(4*math.pi*vaccuum_permittivity*x))  ), lambda x: ((2*reduced_mass*(x**2))/(hbar**2))
-    p_of_r,q_of_r,w_of_r = lambda x: 1, lambda x: l*(l+1)/(x**2) - (1/x), lambda x: 1
+    #p_of_r,q_of_r,w_of_r = lambda x: 1, lambda x: l*(l+1)/(x**2) - (1/x), lambda x: 1
+    p_of_r,q_of_r,w_of_r = lambda x: x**2, lambda x: l*(l+1) - (2*x), lambda x: 2*(x**2)
+
 
     #mesh_dr_start = .0001
     #mesh_dr_mid = .001
@@ -1497,16 +1518,16 @@ def radial(boundary_epsilon=.0001, mid_r_start=1, mid_r_end=999, boundary_inf_ap
 
     #!!!very high mismatch value...for the correct eigenvalue.
     pool = joblib.Parallel(n_jobs=6, verbose=VERBOSITY, batch_size=4096)
-    breakpoint()
+    #breakpoint()
     disable_shooting_pbar = False
     disable_coord_pbar = False
     disable_pot_pbar = False
     baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r,q_of_r,w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=Num_D_Liouville_dx, disable_shooting_pbar=disable_shooting_pbar, disable_coord_pbar=disable_coord_pbar, disable_pot_pbar=disable_pot_pbar, store_solution=True, parallel_pool=pool)
     #print("plotting")
     #generic_plot(np.arange(-.0615,-0.0605,.0001), lambda e: mis_eigen(e)[1])
-    eig_out = mis_eigen(-.0625)
-    plot_data = eig_out[2]
-    plot_data = np.array(plot_data)
+    #eig_out = mis_eigen(-.0625)
+    #plot_data = eig_out[2]
+    #plot_data = np.array(plot_data)
     return baked_mesh,  mis_eigen #mis_eigen(-.0625)[1]
 
 

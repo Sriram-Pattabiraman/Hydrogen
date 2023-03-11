@@ -49,6 +49,7 @@ def Solve_For_Eigens(problem_funcs, x_start=None, x_end=None, baked_x_mesh_overr
         baked_x_mesh = baked_x_mesh_override
 
     baked_mesh, mis_eigen = sl.CPM_Method_Liouville_Mismatch(*problem_funcs, baked_x_mesh, basis_init_vectors[which_basis_init_vector], basis_init_vectors[which_basis_init_vector], mesh_was_already_baked=True, dx=dx, parallel_pool=parallel_pool)
+    #breakpoint()
     if stop_at_candidate_roots_num_thresh==1: #only doing one root means we just use the non-stability-checking root finding method
         get_tailored_prufer = lambda index: lambda lambda_: mis_eigen(lambda_)[1] - index
         guess = 0
@@ -61,15 +62,15 @@ def Solve_For_Eigens(problem_funcs, x_start=None, x_end=None, baked_x_mesh_overr
     eigens = list(filter( lambda x: (x!=None) and (not np.isnan(x)) , eigens))
     return eigens
 
-def Make_Eigen_Func_Given_Eigen(problem_funcs, x_start, x_end, dx=.0001, which_basis_init_vector=0, parallel_pool=None):
+def Make_Eigen_Func_Given_Eigen(problem_funcs, x_start, x_end, dx=.0001, which_basis_init_vector=0, asymptotic_clamping=False, parallel_pool=None):
 
     if parallel_pool is None:
         parallel_pool = joblib.Parallel(n_jobs=6, verbose=VERBOSITY, batch_size=4096)
 
-    def Eigen_Func_Given_Eigen(lambda_, which_basis_init_vector=which_basis_init_vector, parallel_pool=parallel_pool):
+    def Eigen_Func_Given_Eigen(lambda_, which_basis_init_vector=which_basis_init_vector, dx=dx, asymptotic_clamping=asymptotic_clamping, parallel_pool=parallel_pool):
         basis_init_vectors = [0,1], [1,0]
         with parallel_pool as pool:
-            return sl.Solve_LSLP_IVP(lambda_, *problem_funcs, x_start, *basis_init_vectors[which_basis_init_vector], x_end, dx, parallel_pool=pool, store_solution=True)[3]
+            return sl.Solve_LSLP_IVP(lambda_, *problem_funcs, x_start, *basis_init_vectors[which_basis_init_vector], x_end, dx, asymptotic_clamping=asymptotic_clamping, parallel_pool=pool, store_solution=True)[3]
     return Eigen_Func_Given_Eigen
 
 def unravel_eigens(eigens_for_each_coord, parallel_pool=None): #this function looks very simple. it's actually a little sophisticated. hopefully, it's easy to understand even if it was tricky to write. the basic idea is to run through the states of the past coords, and put into a new state list  (*past state, new_possible_coord) for every new_possible_coord in prob.pop()(past state)
@@ -341,14 +342,14 @@ def scalar_3D_plot(coord_ranges, scalar_func, color_func=lambda normed_val: np.a
 def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,0]): #!!!generalize!
     #azimuthal (magnetic quantum numbers) equation
     azi_problem = [lambda x: 1, lambda x: 0, lambda x: 1]
-    lazy_small_number = .0001
+    azi_dx = .001
     bisect_tol = .001
-    azi_mesh = np.arange(0, 2*math.pi, lazy_small_number)
-    baked_azi_mesh = sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*azi_problem, azi_mesh, dx=lazy_small_number)
+    azi_mesh = np.arange(0, 2*math.pi, azi_dx)
+    baked_azi_mesh = sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*azi_problem, azi_mesh, dx=azi_dx)
     which_basis_init_vector_0 = which_basis_init_wronsks[0]
     #breakpoint()
-    azi_eigens = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(azi_problem, baked_x_mesh_override=baked_azi_mesh, which_basis_init_vector=which_basis_init_vector_0, stop_at_candidate_roots_num_thresh=1, potentially_ad_hoc_start_eigen_index=1, dx=lazy_small_number, bisect_tol=bisect_tol, parallel_pool=parallel_pool)
-    azi_eigen_func_given_eigen = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(azi_problem, azi_mesh[0], azi_mesh[-1], which_basis_init_vector=which_basis_init_vector_0, dx=lazy_small_number*(10**-2))
+    azi_eigens = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(azi_problem, baked_x_mesh_override=baked_azi_mesh, which_basis_init_vector=which_basis_init_vector_0, stop_at_candidate_roots_num_thresh=1, potentially_ad_hoc_start_eigen_index=1, dx=azi_dx, bisect_tol=bisect_tol, parallel_pool=parallel_pool)
+    azi_eigen_func_given_eigen = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(azi_problem, azi_mesh[0], azi_mesh[-1], which_basis_init_vector=which_basis_init_vector_0, dx=azi_dx*(10**-2))
 
 
     #theta (azimuthal quantum numbers) equation
@@ -360,13 +361,13 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     mesh_dtheta_mid = .01
     mesh_theta_mid_right = .8
     mesh_dtheta_end = .001
-    lazy_small_number = .001
+    theta_dx = .001
     bisect_tol = .001
     theta_mesh = np.concatenate(np.array([np.arange(boundary_epsilon_theta, mesh_theta_mid_left, mesh_dtheta_left), np.arange(mesh_theta_mid_left, mesh_theta_mid_right, mesh_dtheta_mid), np.arange(mesh_theta_mid_right, math.pi-boundary_epsilon_theta, mesh_dtheta_end)], dtype=object))
-    baked_theta_mesh_given_azi_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*theta_problem_given_azi_eig(*prev_coord_eigens), theta_mesh, dx=lazy_small_number)
+    baked_theta_mesh_given_azi_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*theta_problem_given_azi_eig(*prev_coord_eigens), theta_mesh, dx=theta_dx)
     which_basis_init_vector_1 = which_basis_init_wronsks[1]
-    theta_eigens_given_azi_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(theta_problem_given_azi_eig(*prev_coord_eigens), baked_x_mesh_override=baked_theta_mesh_given_azi_eig(*prev_coord_eigens), mesh_dx=lazy_small_number, which_basis_init_vector=which_basis_init_vector_1, stop_at_candidate_roots_num_thresh=1, potentially_ad_hoc_start_eigen_index=1, dx=lazy_small_number, bisect_tol=bisect_tol, get_eigens_up_to_n=3, parallel_pool=parallel_pool)
-    theta_eigen_func_given_azi_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(theta_problem_given_azi_eig(*prev_coord_eigens), theta_mesh[0], theta_mesh[-1], dx=lazy_small_number*(10**-2), which_basis_init_vector=which_basis_init_vector_1)
+    theta_eigens_given_azi_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(theta_problem_given_azi_eig(*prev_coord_eigens), baked_x_mesh_override=baked_theta_mesh_given_azi_eig(*prev_coord_eigens), mesh_dx=theta_dx, which_basis_init_vector=which_basis_init_vector_1, stop_at_candidate_roots_num_thresh=1, potentially_ad_hoc_start_eigen_index=1, dx=theta_dx, bisect_tol=bisect_tol, get_eigens_up_to_n=3, parallel_pool=parallel_pool)
+    theta_eigen_func_given_azi_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(theta_problem_given_azi_eig(*prev_coord_eigens), theta_mesh[0], theta_mesh[-1], dx=theta_dx*(10**-2), which_basis_init_vector=which_basis_init_vector_1)
 
 
     #radial
@@ -381,7 +382,8 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     mid_r_end = 999
     boundary_inf_approx = 1000
     #p_of_r,q_of_r,w_of_r = lambda x: x**2, lambda x: l*(l+1) - ( ((2*reduced_mass*(x**2))/(hbar**2)) * ((electron_charge**2)/(4*math.pi*vaccuum_permittivity*x))  ), lambda x: ((2*reduced_mass*(x**2))/(hbar**2))
-    r_problem_given_theta_eig = lambda *prev_coord_eigens: [lambda x: 1, lambda x: prev_coord_eigens[1]/(x**2) - (1/x), lambda x: 1]
+    #r_problem_given_theta_eig = lambda *prev_coord_eigens: [lambda x: 1, lambda x: prev_coord_eigens[1]/(x**2) - (1/x), lambda x: 1]
+    r_problem_given_theta_eig = lambda *prev_coord_eigens: [lambda x: x**2, lambda x: prev_coord_eigens[1]-2*x, lambda x: 2*(x**2)]
     mesh_dr_start = .0001
     mesh_dr_mid = .01
     mesh_dr_end = .0001
@@ -390,47 +392,76 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     r_mesh_end = np.arange(mid_r_end, boundary_inf_approx, mesh_dr_end)
     r_mesh = np.concatenate([r_mesh_start, r_mesh_mid, r_mesh_end])
     Num_D_Liouville_dx = .0001
-    lazy_small_number = .0001
-    baked_radial_mesh_given_theta_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*r_problem_given_theta_eig(*prev_coord_eigens), r_mesh, dx=lazy_small_number)
+    r_dx = .0001
+    baked_radial_mesh_given_theta_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*r_problem_given_theta_eig(*prev_coord_eigens), r_mesh, dx=r_dx)
     which_basis_init_vector_2 = which_basis_init_wronsks[2]
     bisect_tol = .0001
-    radial_eigens_given_theta_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(r_problem_given_theta_eig(*prev_coord_eigens), baked_x_mesh_override=baked_radial_mesh_given_theta_eig(*prev_coord_eigens), dx=Num_D_Liouville_dx, which_basis_init_vector=which_basis_init_vector_2, bisect_tol=bisect_tol, parallel_pool=parallel_pool)
-    radial_eigen_func_given_theta_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(r_problem_given_theta_eig(*prev_coord_eigens), r_mesh[0], r_mesh[-1], dx=mesh_dr_start, which_basis_init_vector=which_basis_init_vector_2)
+    
 
+    radial_eigens_given_theta_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(r_problem_given_theta_eig(*prev_coord_eigens), baked_x_mesh_override=baked_radial_mesh_given_theta_eig(*prev_coord_eigens), dx=Num_D_Liouville_dx, which_basis_init_vector=which_basis_init_vector_2, bisect_tol=bisect_tol, parallel_pool=parallel_pool)
+    #breakpoint()
+    #radial_eigen_func_given_theta_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(r_problem_given_theta_eig(*prev_coord_eigens), r_mesh[0], r_mesh[-1], dx=mesh_dr_start, which_basis_init_vector=which_basis_init_vector_2, asymptotic_clamping=True)
+    radial_eigen_func_given_theta_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(r_problem_given_theta_eig(*prev_coord_eigens), r_mesh[0], r_mesh[-1], dx=mesh_dr_start, which_basis_init_vector=which_basis_init_vector_2, asymptotic_clamping=True)
+    
+    #print("test")
+    #breakpoint()
     #breakpoint()
     for l in tqdm(range(0, 3)):
         for m in tqdm(range(-l, l+1)):
-            azi_func = interp_in_coord_out_arr(azi_eigen_func_given_eigen()(m**2))
-            #breakpoint()
-            theta_func = interp_in_coord_out_arr(theta_eigen_func_given_azi_eig(m**2)(l*(l+1)))
-            #breakpoint()
-            hopefully_real_sph_harm = lambda phi, theta: azi_func(phi) * theta_func(theta)
-            data_for_r_sph = []
-            x_min, x_max, y_min, y_max = 0, 2*math.pi, 0, math.pi
-            for i in np.arange(0, 2*math.pi, .1):
-                sub=[]
-                for j in np.arange(0, 1*math.pi, .1):
-                    sub.append(hopefully_real_sph_harm(i,j))
-                data_for_r_sph.append(sub)
-            data_for_r_sph = np.array(data_for_r_sph)
-            data_for_r_sph = data_for_r_sph.transpose()
-            data_for_r_sph = np.flip(data_for_r_sph, axis=0)
-            np.delete(data_for_r_sph, 0, 0)
-            fig, ax = plt.subplots()
-            axImage = ax.imshow(data_for_r_sph, extent=[x_min, x_max, y_min, y_max], cmap='viridis')
-            fig.colorbar(axImage, ax=ax)
-            fig.savefig(f"Images/Hopefully_Correct_Real_Spherical_Harmonics__init={which_basis_init_wronsks[0]}_{which_basis_init_wronsks[1]}/l={l}_m={m}")
-            plt.close()
+            energy_list = radial_eigens_given_theta_eig(m**2, l*(l+1))
+            n = l+1
+            for energy in energy_list:
+                #breakpoint()
+                azi_func = interp_in_coord_out_arr(azi_eigen_func_given_eigen()(m**2))
+                #breakpoint()
+                theta_func = interp_in_coord_out_arr(theta_eigen_func_given_azi_eig(m**2)(l*(l+1)))
+                #breakpoint()
+                hopefully_real_sph_harm = lambda phi, theta: azi_func(phi) * theta_func(theta)
+                radial_func = interp_in_coord_out_arr(np.array(radial_eigen_func_given_theta_eig(m**2,l*(l+1))(energy)))
+                hopefully_hydrogen_wave_function = lambda r, phi, theta: hopefully_real_sph_harm(phi, theta) * radial_func(r)
+                #breakpoint()
+                with open(f"data/hopefully_hydrogen_wave_function_data_init={which_basis_init_wronsks}_nlm={n}_{l}_{m}.txt", 'w') as f:
+                    for r in tqdm(np.arange(0,1,.1)):
+                        for phi in tqdm(np.arange(0,2*math.pi,.01)):
+                            for theta in tqdm(np.arange(0,math.pi,.02)):
+                                f.write(f"{r},{phi},{theta},{hopefully_hydrogen_wave_function(r,phi,theta)}\n")
+ 
+                fig, ax = plt.subplots()
+                ax.plot(np.arange(0,40,.0001), [(radial_func(r)**2) * (r**2) for r in np.arange(0,40,.0001)])
+                fig.savefig(f"Images/Radial_Probability_Densities/Prob_{n}_{l}_{m}")
+                
+                #scalar_3D_plot([np.arange(-1, 1, .1), np.arange(-1, 1, .1), np.arange(-1, 1, .1)], hopefully_hydrogen_wave_function, )
+                n+=1
+                '''
+                data_for_r_sph = []
+                x_min, x_max, y_min, y_max = 0, 2*math.pi, 0, math.pi
+                for i in np.arange(0, 2*math.pi, .1):
+                    sub=[]
+                    for j in np.arange(0, 1*math.pi, .1):
+                        sub.append(hopefully_real_sph_harm(i,j))
+                    data_for_r_sph.append(sub)
+                data_for_r_sph = np.array(data_for_r_sph)
+                data_for_r_sph = data_for_r_sph.transpose()
+                data_for_r_sph = np.flip(data_for_r_sph, axis=0)
+                data_for_r_sph.clip(-15, 15, out=data_for_r_sph)
+                fig, ax = plt.subplots()
+                axImage = ax.imshow(data_for_r_sph, extent=[x_min, x_max, y_min, y_max], cmap='viridis')
+                fig.colorbar(axImage, ax=ax)
+                fig.savefig(f"Images/Hopefully_Correct_Real_Spherical_Harmonics_{which_basis_init_wronsks[0]}_{which_basis_init_wronsks[1]}/l={l}_m={m}")
+                plt.close()
+                '''
+            
     
     
     
     
-    
-    eigen_funcs_for_each_coord = [azi_eigen_func_given_eigen, theta_eigen_func_given_azi_eig, radial_eigen_func_given_theta_eig]
+    #eigen_funcs_for_each_coord = [azi_eigen_func_given_eigen, theta_eigen_func_given_azi_eig, radial_eigen_func_given_theta_eig]
     
     
     #breakpoint()
-    vector_eigen_func = Make_Make_Total_Eigen_Func_Given_Eigens_Given_Component_Eigen_Funcs(eigen_funcs_for_each_coord)
+    
+    #vector_eigen_func = Make_Make_Total_Eigen_Func_Given_Eigens_Given_Component_Eigen_Funcs(eigen_funcs_for_each_coord)
+    
     #vector_eigen_func(0,2,-.0625)(1,1,1)
     #eigen_func_for_each_coord = lambda azi_eig, theta_eig, radial_eig: [azi_eigen_func_given_eigen_b1(azi_eig), theta_eigen_func_given_azi_eig_b1(azi_eig)(theta_eig), radial_eigen_func_given_theta_eig_b1(azi_eig, theta_eig)(radial_eig)]
     #prod_func = lambda azi_eig, theta_eig, radial_eig: [eigen_func_for_each_coord(azi_eig, theta_eig, radial_eig)]
@@ -438,9 +469,11 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     #!!!eigens_for_each_coord = [azi_eigens, theta_eigens_given_azi_eig, radial_eigens_given_theta_eig]
     #breakpoint()
     #!!!coord_eigens = unravel_eigens(eigens_for_each_coord)
-    coord_eigens="Placeholder"
+    
+    #coord_eigens="Placeholder"
+    
     #breakpoint()
-    return coord_eigens, vector_eigen_func
+    #return coord_eigens, vector_eigen_func
 
 def listify_meshgrids_and_remove_zeros(X, Y, Z, C): #!!! here and earlier, find way to distinguish between default_initialized zero and actual function zero [try initialzing with nans via a function that takes in shape and makes an empty*nan]
     newx, newy, newz = np.zeros(X.shape[0]), np.zeros(Y.shape[1]), np.zeros(Z.shape[2])
@@ -452,10 +485,10 @@ def listify_meshgrids_and_remove_zeros(X, Y, Z, C): #!!! here and earlier, find 
             point_indice += 1
     return newx, newy, newz, newc
 
-vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,0]) 
-vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,1,0]) 
-vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,0,0]) 
-vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,1,0]) 
+#o1=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,0]) 
+#o2=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,1,0]) 
+#o3=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,0,0]) 
+o4=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,1,0]) 
 #breakpoint()
 #out_func = vector_eigen_for_choice_of_basis_init_wronsks()[1](0,0,-.0625)
 #out_val = out_func(1,1,1)
