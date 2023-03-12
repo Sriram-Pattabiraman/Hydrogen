@@ -38,7 +38,7 @@ def Solve_For_Eigens(problem_funcs, x_start=None, x_end=None, baked_x_mesh_overr
     basis_init_vectors = [0,1], [1,0]
 
     if parallel_pool is None:
-        parallel_pool = joblib.Parallel(n_jobs=6, verbose=VERBOSITY, batch_size=4096)
+        parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
     if baked_x_mesh_override is None:
         if (not (x_start is None)) and (not (x_end is None)):
             baked_x_mesh = np.arange(x_start, x_end, mesh_dx)
@@ -65,7 +65,7 @@ def Solve_For_Eigens(problem_funcs, x_start=None, x_end=None, baked_x_mesh_overr
 def Make_Eigen_Func_Given_Eigen(problem_funcs, x_start, x_end, dx=.0001, which_basis_init_vector=0, asymptotic_clamping=False, parallel_pool=None):
 
     if parallel_pool is None:
-        parallel_pool = joblib.Parallel(n_jobs=6, verbose=VERBOSITY, batch_size=4096)
+        parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
 
     def Eigen_Func_Given_Eigen(lambda_, which_basis_init_vector=which_basis_init_vector, dx=dx, asymptotic_clamping=asymptotic_clamping, parallel_pool=parallel_pool):
         basis_init_vectors = [0,1], [1,0]
@@ -75,7 +75,7 @@ def Make_Eigen_Func_Given_Eigen(problem_funcs, x_start, x_end, dx=.0001, which_b
 
 def unravel_eigens(eigens_for_each_coord, parallel_pool=None): #this function looks very simple. it's actually a little sophisticated. hopefully, it's easy to understand even if it was tricky to write. the basic idea is to run through the states of the past coords, and put into a new state list  (*past state, new_possible_coord) for every new_possible_coord in prob.pop()(past state)
     if parallel_pool is None:
-        parallel_pool = joblib.Parallel(n_jobs=6, verbose=VERBOSITY, batch_size=4096)
+        parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
     states = [()]
     pbar = tqdm(total=len(eigens_for_each_coord), desc='Unraveling...')
     while len(eigens_for_each_coord) > 0 :

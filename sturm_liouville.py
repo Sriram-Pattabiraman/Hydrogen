@@ -518,7 +518,7 @@ def backward_mat_for_one_baking_iter(this_pots_minus_lambda, this_delta_backward
 
 def Bake_Prop_Mats(baked_mesh, lambda_, indep_var_mesh_key="mesh", matching_point_index=None, disable_pbar=False, parallel_pool=None): #assumes mesh has delta_forward_mesh baked in
     if parallel_pool is None:
-        parallel_pool = joblib.Parallel(n_jobs=6, verbose=VERBOSITY, batch_size=4096)
+        parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
     if matching_point_index is None:
         matching_point_index = len(baked_mesh[indep_var_mesh_key])//2
 
@@ -764,7 +764,7 @@ def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vecto
     if indep_var_mesh_key_for_history_override is None:
         indep_var_mesh_key_for_history_override = indep_var_mesh_key
     if parallel_pool is None:
-        parallel_pool = joblib.Parallel(n_jobs=6, verbose=VERBOSITY, batch_size=4096)
+        parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
     #!!!implement energy derivative tracking for newton's method
     #!!!see if newton's method is actually more practical than bisection here
     if "delta_forward_mesh" not in baked_mesh.keys():
@@ -997,7 +997,7 @@ def Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p
 
 def CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, mesh_was_already_baked=False, dx=.001, disable_shooting_pbar=True, disable_pot_pbar=False, disable_coord_pbar=False, disable_local_scaling_factors_baking_pbar=True, store_solution=False, parallel_pool=None):
     if parallel_pool is None:
-        parallel_pool = joblib.Parallel(n_jobs=6, verbose=VERBOSITY, batch_size=4096)
+        parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
 
     if not mesh_was_already_baked:
         pot_of_x_baked_double_coordinate_mesh = Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p_of_r, q_of_r, w_of_r, r_mesh, dx=dx, disable_pot_pbar=disable_pot_pbar, disable_coord_pbar=disable_coord_pbar)
@@ -1450,7 +1450,7 @@ def azi():
     newton_tol = .001
     r_mesh = np.arange(0, 2*math.pi, mesh_dr)
     init_left_shot_vector, init_right_shot_vector = [0,1], [0,1]
-    pool = joblib.Parallel(n_jobs=6, verbose=VERBOSITY, batch_size=4096)
+    pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
     baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=.01, parallel_pool=pool)
     generic_plot(np.arange(-.1, 10, .2), lambda e: mis_eigen(e)[1])
 
@@ -1517,7 +1517,7 @@ def radial(boundary_epsilon=.0001, mid_r_start=1, mid_r_end=999, boundary_inf_ap
     #Num_D_Liouville_dx = .0001
 
     #!!!very high mismatch value...for the correct eigenvalue.
-    pool = joblib.Parallel(n_jobs=6, verbose=VERBOSITY, batch_size=4096)
+    pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
     #breakpoint()
     disable_shooting_pbar = False
     disable_coord_pbar = False
