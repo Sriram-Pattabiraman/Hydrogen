@@ -348,11 +348,21 @@ def normalize(func, window=[[0,1], [0, 2*math.pi], [0, math.pi]], func_coord_sys
     normalized_func = lambda coord1, coord2, coord3: func(coord1, coord2, coord3)/integral_value if (window[0][0]<=coord1<=window[0][1] and window[1][0]<=coord2<=window[1][1] and window[2][0]<=coord3<=window[2][1]) else 0
     return normalized_func
 
+def restrict(func, restriction_window_lows=None, restriction_window_highs=None):
+    def restricted_func(*args, func=func, restriction_window_lows=restriction_window_lows, restriction_window_highs=restriction_window_highs):
+        coord = np.array(args)  
+        if np.all(np.less_equal(coord, restriction_window_highs)) and np.all(np.greater_equal(coord, restriction_window_lows)):
+            return func(*args)
+    return restricted_func
+    
 def metropolis_hastings(un_normed_probability_density, starting_window=[[-1,1], [-1,1], [-1,1]], dimension=3, starting_diagonal_covariance=np.array([1,1,1], dtype=np.float64), run_time=1000, sample_size=10, disable_metropolis_pbar=True):
     starting_diagonal_covariance = starting_diagonal_covariance.astype(np.float64)
     starting_window = np.array(starting_window)
     
     starting_window_lows, starting_window_highs = starting_window[:,0], starting_window[:,1]
+    un_normed_probability_density = restrict(un_normed_probability_density, restriction_window_lows=starting_window_lows, restriction_window_highs=starting_window_highs)
+     
+        
     starting_state = np.random.default_rng().uniform(low=starting_window_lows, high=starting_window_highs)
     
     def make_proposal_sampler(diagonal_covariance):
@@ -418,6 +428,8 @@ def plot3D_point_list(points, fig=None, ax=None, alpha=.5, plotting_window=[ [-5
     if ax == None:
         fig = plt.figure()
         ax = fig.add_subplot(projection='3d')
+    if type(points) != np.ndarray:
+        points = np.array(points)
     
     ax.scatter(points[:,0], points[:,1], points[:,2], alpha=alpha, s=.5)
     ax.axes.set_xlim3d(*plotting_window[0])
@@ -439,7 +451,7 @@ def point_cloud_plot(un_normed_probability_density, metropolis_starting_window=[
         return fig,ax
             
     
-def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,0]): #!!!generalize!
+def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,0], do_plot=False): #!!!generalize!
     #azimuthal (magnetic quantum numbers) equation
     azi_problem = [lambda x: 1, lambda x: 0, lambda x: 1]
     azi_dx = .001
@@ -523,18 +535,23 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
                 radial_func = interp_in_coord_out_arr(np.array(radial_eigen_func_given_theta_eig(m**2,l*(l+1))(energy)))
                 hopefully_hydrogen_wave_function = lambda r, phi, theta: hopefully_real_sph_harm(phi, theta) * radial_func(r)
                 #breakpoint()
-                end_of_radius = min(2*(n**2)+l), (40)
+                end_of_radius = min(2*(n**2)+l, (40))
                 window = [[-end_of_radius, end_of_radius],[-end_of_radius, end_of_radius],[-end_of_radius, end_of_radius]]
                 un_normed_probability_density = lambda r, phi, theta: hopefully_hydrogen_wave_function(r, phi, theta)**2
                 
-                fig, ax = plt.subplots()
-                ax.set_title(f"n,l,m={n},{l},{m}; energy={round(energy, 10)} hartrees")
-                ax.plot(np.arange(0,end_of_radius,.0001), [(radial_func(r)**2) * (r**2) for r in np.arange(0,end_of_radius,.0001)], '.')
-                fig.savefig(f"Images/Radial_Probability_Densities/Rad_Prob_{n}_{l}_{m}.png")
-                fig.savefig(f"Images/Radial_Probability_Densities/Rad_Prob_{n}_{l}_{m}.svg")
-                
-                point_cloud_plot(un_normed_probability_density, metropolis_starting_window=window, func_coord_system='spherical', window_coord_system='cartesian', num_points=10000, alpha=.1, filename=f'Orbital_{n}_{l}_{m}')
-                print('check result!')
+                if do_plot==True:
+                    #fig, ax = plt.subplots()
+                    #ax.set_title(f"n,l,m={n},{l},{m}; energy={round(energy, 10)} hartrees")
+                    #ax.plot(np.arange(0,end_of_radius,.0001), [(radial_func(r)**2) * (r**2) for r in np.arange(0,end_of_radius,.0001)], '.')
+                    #fig.savefig(f"Images/Radial_Probability_Densities/Rad_Prob_{n}_{l}_{m}.png")
+                    #fig.savefig(f"Images/Radial_Probability_Densities/Rad_Prob_{n}_{l}_{m}.svg")
+                    
+                    point_cloud_plot(un_normed_probability_density, metropolis_starting_window=window, func_coord_system='spherical', window_coord_system='cartesian', num_points=10000, alpha=.1, filename=f'Orbital_{n}_{l}_{m}')
+                    print('check result!')
+                else:
+                    testing1 = [(radial_func(r)**2) * (r**2) for r in np.arange(0,end_of_radius,.0001)]
+                    testing2 = point_cloud_plot(un_normed_probability_density, metropolis_starting_window=window, func_coord_system='spherical', window_coord_system='cartesian', num_points=10000, alpha=.1, filename=None)
+                    
 
                 
                 #scalar_3D_plot([np.arange(-1, 1, .1), np.arange(-1, 1, .1), np.arange(-1, 1, .1)], hopefully_hydrogen_wave_function, )
@@ -595,7 +612,7 @@ def listify_meshgrids_and_remove_zeros(X, Y, Z, C): #!!! here and earlier, find 
 #o1=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,0]) 
 #o2=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,1,0]) 
 #o3=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,0,0]) 
-o4=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,1,0]) 
+o4=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,1,0], do_plot=True) 
 #breakpoint()
 #out_func = vector_eigen_for_choice_of_basis_init_wronsks()[1](0,0,-.0625)
 #out_val = out_func(1,1,1)

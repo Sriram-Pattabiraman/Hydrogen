@@ -35,11 +35,9 @@ VERBOSITY = 1
 
 
 #references for future me:
-#the one that everyone copies from: numerical solution of sturm liouville problems by J.D. pryce, isbn 13: 9780198534150.
+#the famous classic one: numerical solution of sturm liouville problems by J.D. pryce, isbn 13: 9780198534150.
 #https://libstore.ugent.be/fulltxt/RUG01/001/050/950/RUG01-001050950_2010_0001_AC.pdf#page=28&zoom=130,39,29 - verle ledoux sturm liouville apprx
-#https://www.jstor.org/stable/2007594?seq=3#metadata_info_tab_contents - magic eigenfinder using minimum subeigenfinders (maybe it's a shooter?). advantages are it's just as good for far out eigenvals as for the first one (requiring ), the finding of the first eigenvalue on the subinterval is more accurate (same for the eigenfunction) [equilibriating the eigenfunctions is also accurate [also probably more accurate if itp as opposed to newton is used]],
-#https://dl.acm.org/doi/10.1145/3423597 and https://docs.rs/kurbo/0.8.1/src/kurbo/common.rs.html#194-237 - itp method - since prufer mismatch is monotonic (and 2nd diff? 2nd cont diff?) we get the error bound of epsilon [using the rust code's convention] on the zero, regardless (i think??) of the starting interval that contains the root.
-#https://www.sciencedirect.com/science/article/pii/S0010465508003305#fd007 - general numerical introduction, better explanation of pruess/coefficient approximation than ledoux - fixed mesh, resistant by instability nor stiffness, resistant/actively better error when eigenvalues go up, interval truncation, parralelizable, potentionally similar but easier and better magic than before
+#https://arxiv.org/pdf/1408.3082.pdf - RIDC
 
 '''
 We use the convention that the Sturm-Liouville problem is a real 2nd order ODE of the form d/dx [p(x)dy(x)/dx] - q(x)y(x) = -lambda w(x) y(x), where finding the possible eigenvalue lambda is part of the problem and thus unspecified
@@ -969,7 +967,7 @@ def Find_Reciprocal_Sigma_2nd_Deriv_At_A_Good_Indice(baked_mesh, q_of_r, w_of_r,
     recip_sigma_2nd_deriv_x = (recip_sigma_deriv_x_f1 - recip_sigma_deriv_x_b1)/( (x_f1-x)/2 - (x_b1-x)/2 )
     return recip_sigma_2nd_deriv_x
 
-def Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=None, backup_x_of_r=None, backup_r_of_x=None, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh", dx=.001): #all the sources have this, but the only one that actually makes it clear what the equation means is J.D. Pryce's book Numerical Solution of Sturm Liouville Problems, and it really looks like everyone else copied the specific equation from Pyrce while forgetting to copy the explanatory note.
+def Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=None, backup_x_of_r=None, backup_r_of_x=None, r_var_mesh_name="r_mesh", x_var_mesh_name="x_mesh", dx=.001): #all the sources have this, but the only one that actually makes it clear what the equation means is J.D. Pryce's book Numerical Solution of Sturm Liouville Problems.
     if backup_sigma is None:
         def pot_of_x(baked_mesh, indice):
             original_r = baked_mesh[r_var_mesh_name][indice]
