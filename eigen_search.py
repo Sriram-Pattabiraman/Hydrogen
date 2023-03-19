@@ -480,29 +480,28 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     vaccuum_permittivity = constants.epsilon_0
     hbar = constants.hbar
 
-    boundary_epsilon_radial = .0001
+    boundary_epsilon_radial = .01
     mid_r_start = 1
-    mid_r_end = 999
-    boundary_inf_approx = 1000
+    mid_r_end = 49
+    boundary_inf_approx = 50
     #p_of_r,q_of_r,w_of_r = lambda x: x**2, lambda x: l*(l+1) - ( ((2*reduced_mass*(x**2))/(hbar**2)) * ((electron_charge**2)/(4*math.pi*vaccuum_permittivity*x))  ), lambda x: ((2*reduced_mass*(x**2))/(hbar**2))
     #r_problem_given_theta_eig = lambda *prev_coord_eigens: [lambda x: 1, lambda x: prev_coord_eigens[1]/(x**2) - (1/x), lambda x: 1]
     r_problem_given_theta_eig = lambda *prev_coord_eigens: [lambda x: x**2, lambda x: prev_coord_eigens[1]-2*x, lambda x: 2*(x**2)]
-    mesh_dr_start = .0001
+    mesh_dr_start = .01
     mesh_dr_mid = .01
-    mesh_dr_end = .0001
+    mesh_dr_end = .01
     r_mesh_start = np.arange(boundary_epsilon_radial, mid_r_start, mesh_dr_start)
     r_mesh_mid = np.arange(mid_r_start, mid_r_end, mesh_dr_mid)
     r_mesh_end = np.arange(mid_r_end, boundary_inf_approx, mesh_dr_end)
     r_mesh = np.concatenate([r_mesh_start, r_mesh_mid, r_mesh_end])
     Num_D_sigma_dx = .0001
-    r_liouville_n = 10
-    r_dx = .0001
-    baked_radial_mesh_given_theta_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*r_problem_given_theta_eig(*prev_coord_eigens), r_mesh, liouville_n=r_liouville_n, dx=r_dx)
+    r_liouville_n = 2
+    baked_radial_mesh_given_theta_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*r_problem_given_theta_eig(*prev_coord_eigens), r_mesh, liouville_n=r_liouville_n, dx=Num_D_sigma_dx)
     which_basis_init_vector_2 = which_basis_init_wronsks[2]
     bisect_tol = .0001
-    
+    force_monotone = True
 
-    radial_eigens_given_theta_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(r_problem_given_theta_eig(*prev_coord_eigens), baked_x_mesh_override=baked_radial_mesh_given_theta_eig(*prev_coord_eigens), dx=Num_D_sigma_dx, which_basis_init_vector=which_basis_init_vector_2, bisect_tol=bisect_tol, parallel_pool=parallel_pool, force_monotone=False, force_monotone_start_val=-.1, stepping_from_anchor_dx=.001)
+    radial_eigens_given_theta_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(r_problem_given_theta_eig(*prev_coord_eigens), baked_x_mesh_override=baked_radial_mesh_given_theta_eig(*prev_coord_eigens), dx=Num_D_sigma_dx, which_basis_init_vector=which_basis_init_vector_2, bisect_tol=bisect_tol, parallel_pool=parallel_pool, force_monotone=force_monotone, force_monotone_start_val=-.13, stepping_from_anchor_dx=.001)
     #breakpoint()
     #radial_eigen_func_given_theta_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(r_problem_given_theta_eig(*prev_coord_eigens), r_mesh[0], r_mesh[-1], dx=mesh_dr_start, which_basis_init_vector=which_basis_init_vector_2, asymptotic_clamping=True)
     radial_eigen_func_given_theta_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(r_problem_given_theta_eig(*prev_coord_eigens), r_mesh[0], r_mesh[-1], dx=mesh_dr_start, which_basis_init_vector=which_basis_init_vector_2, asymptotic_clamping=True)
