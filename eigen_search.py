@@ -59,9 +59,10 @@ def Solve_For_Eigens(problem_funcs, x_start=None, x_end=None, baked_x_mesh_overr
     else:
         stable_root = lambda index: sl.find_stable_roots_in_mis_and_cpm_prufer(mis_eigen, index, stop_at_candidate_roots_num_thresh=stop_at_candidate_roots_num_thresh)[0][0]
     #breakpoint()
-    eigens = [stable_root(i) for i in tqdm(range(potentially_ad_hoc_start_eigen_index, get_eigens_up_to_n), desc='Finding Eigens...')]
-    eigens = list(filter( lambda x: (x!=None) and (not np.isnan(x)) , eigens))
-    return eigens
+    eigens = (stable_root(i) for i in tqdm(range(potentially_ad_hoc_start_eigen_index, get_eigens_up_to_n), desc='Finding Eigens...'))
+    for eigen in eigens:
+        if eigen != None and not np.isnan(eigen):
+            yield eigen
 
 def Make_Eigen_Func_Given_Eigen(problem_funcs, x_start, x_end, dx=.0001, which_basis_init_vector=0, asymptotic_clamping=False, parallel_pool=None):
 
@@ -347,7 +348,7 @@ def normalize(func, window=[[0,1], [0, 2*math.pi], [0, math.pi]], func_coord_sys
     normalized_func = lambda coord1, coord2, coord3: func(coord1, coord2, coord3)/integral_value if (window[0][0]<=coord1<=window[0][1] and window[1][0]<=coord2<=window[1][1] and window[2][0]<=coord3<=window[2][1]) else 0
     return normalized_func
 
-def metropolis_hastings(un_normed_probability_density, starting_window=[[-1,1], [-1,1], [-1,1]], dimension=3, starting_diagonal_covariance=np.array([1,1,1], dtype=np.float64), run_time=1000, sample_size=10, pbar=True):
+def metropolis_hastings(un_normed_probability_density, starting_window=[[-1,1], [-1,1], [-1,1]], dimension=3, starting_diagonal_covariance=np.array([1,1,1], dtype=np.float64), run_time=1000, sample_size=10, disable_metropolis_pbar=True):
     starting_diagonal_covariance = starting_diagonal_covariance.astype(np.float64)
     starting_window = np.array(starting_window)
     
@@ -367,11 +368,8 @@ def metropolis_hastings(un_normed_probability_density, starting_window=[[-1,1], 
     accept_list_size = 100 #!!!
     accept_list = []
     acceptance_rate = None
-    if pbar==True:
-        maybe_pbar_iteration_list = tqdm(range(run_time))
-    else:
-        maybe_pbar_iteration_list = range(run_time)
-    for i in maybe_pbar_iteration_list:
+
+    for i in tqdm(range(run_time), desc="Travesing Markov Chain...", disable=disable_metropolis_pbar):
         total_iters += 1
         state_list.append(this_state)
         
@@ -432,7 +430,7 @@ def point_cloud_plot(un_normed_probability_density, metropolis_starting_window=[
     if window_coord_system == 'cartesian':
         cartesian_un_normed_prob_density = lambda x,y,z: un_normed_probability_density(*convert_coord([x,y,z], from_system='cartesian', out_system=func_coord_system))
         
-        points, total_state_list = metropolis_hastings(cartesian_un_normed_prob_density, starting_window=metropolis_starting_window, run_time=num_points*100, sample_size=num_points)
+        points, total_state_list = metropolis_hastings(cartesian_un_normed_prob_density, starting_window=metropolis_starting_window, run_time=num_points*10, sample_size=num_points)
         
         fig, ax = plot3D_point_list(points, fig=fig, ax=ax, alpha=alpha)
         if filename is not None:
@@ -511,7 +509,6 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     #breakpoint()
     for l in tqdm(range(0, 3)):
         for m in tqdm(range(-l, l+1)):
-            breakpoint()
             energy_list = radial_eigens_given_theta_eig(m**2, l*(l+1))
             n = l+1
             for energy in energy_list:
@@ -523,15 +520,18 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
                 radial_func = interp_in_coord_out_arr(np.array(radial_eigen_func_given_theta_eig(m**2,l*(l+1))(energy)))
                 hopefully_hydrogen_wave_function = lambda r, phi, theta: hopefully_real_sph_harm(phi, theta) * radial_func(r)
                 #breakpoint()
-                window = [[-40,40],[-40,40],[-40,40]]
+                end_of_radius = 5*(n**2)
+                window = [[-end_of_radius, end_of_radius],[-end_of_radius, end_of_radius],[-end_of_radius, end_of_radius]]
                 un_normed_probability_density = lambda r, phi, theta: hopefully_hydrogen_wave_function(r, phi, theta)**2
                 
-                point_cloud_plot(un_normed_probability_density, metropolis_starting_window=window, func_coord_system='spherical', window_coord_system='cartesian', num_points=10000, alpha=.0001, filename=f'{n}_{l}_{m}')
+                #fig, ax = plt.subplots()
+                #ax.set_title(f"n,l,m={n},{l},{m}; energy={round(energy, 10)} hartrees")
+                #ax.plot(np.arange(0,end_of_radius,.0001), [(radial_func(r)**2) * (r**2) for r in np.arange(0,end_of_radius,.0001)])
+                #fig.savefig(f"Images/Radial_Probability_Densities/Prob_{n}_{l}_{m}")
+                
+                point_cloud_plot(un_normed_probability_density, metropolis_starting_window=window, func_coord_system='spherical', window_coord_system='cartesian', num_points=100, alpha=1, filename=f'{n}_{l}_{m}')
                 print('check result!')
-                fig, ax = plt.subplots()
-                ax.set_title(f"n,l,m={n},{l},{m}; energy={round(energy, 10)} hartrees")
-                ax.plot(np.arange(0,40,.0001), [(radial_func(r)**2) * (r**2) for r in np.arange(0,40,.0001)])
-                fig.savefig(f"Images/Radial_Probability_Densities/Prob_{n}_{l}_{m}")
+
                 
                 #scalar_3D_plot([np.arange(-1, 1, .1), np.arange(-1, 1, .1), np.arange(-1, 1, .1)], hopefully_hydrogen_wave_function, )
                 n+=1

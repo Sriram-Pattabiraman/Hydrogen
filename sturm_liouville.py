@@ -580,9 +580,7 @@ def Bake_Local_Scaling_Factors(baked_mesh, global_scaling_factor, lambda_, indep
     baked_mesh["local_scaling_factor_right_mesh"] = [] #same reversed caveat as in the bake prop mats function
     left_index = 0
     right_index = len(baked_mesh[indep_var_mesh_key])-1
-    if not disable_pbar:
-        print("Baking Local_Scaling_Factors...")
-    with tqdm(total=max(matching_point_index-left_index, right_index-matching_point_index), disable=disable_pbar) as pbar:
+    with tqdm(total=max(matching_point_index-left_index, right_index-matching_point_index), desc="Baking Local Scaling Factors...", disable=disable_pbar) as pbar:
         while left_index < matching_point_index and right_index > matching_point_index:
             if left_index < matching_point_index:
                 if lambda_ > baked_mesh["potential_mesh"][left_index]:
@@ -1479,7 +1477,7 @@ def find_first_n_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, up_to_n_eigens
 
     guess_0 = initial_guess_0
     out_list = []
-    for eigen_index in tqdm(custom_eigen_list):
+    for eigen_index in tqdm(custom_eigen_list, desc="Finding Eigens From Mismatch..."):
         eigen_val, error = find_ith_eigen_val_given_Prufer_Mismatch(Prufer_Mismatch, eigen_index, tolerance, guess_0=guess_0, initial_step=initial_step, adjusting_factor=adjusting_factor)
         if abs(eigen_val)==np.inf: #throw out infinite eigen_val
             continue
