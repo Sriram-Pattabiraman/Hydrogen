@@ -529,7 +529,7 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
                 #ax.plot(np.arange(0,end_of_radius,.0001), [(radial_func(r)**2) * (r**2) for r in np.arange(0,end_of_radius,.0001)])
                 #fig.savefig(f"Images/Radial_Probability_Densities/Prob_{n}_{l}_{m}")
                 
-                point_cloud_plot(un_normed_probability_density, metropolis_starting_window=window, func_coord_system='spherical', window_coord_system='cartesian', num_points=100, alpha=1, filename=f'{n}_{l}_{m}')
+                point_cloud_plot(un_normed_probability_density, metropolis_starting_window=window, func_coord_system='spherical', window_coord_system='cartesian', num_points=10000, alpha=.1, filename=f'{n}_{l}_{m}')
                 print('check result!')
 
                 
