@@ -264,12 +264,16 @@ def exponential_fit(point_list):
     if type(point_list) != np.ndarray:
         point_list = np.array(point_list)
     a,b = sp.optimize.curve_fit(lambda r,a,b: a*math.e**(b*r), point_list[:,0], point_list[:,1])[0]
+    if b > 0:
+        b = 0
     return lambda r: a*math.e**(b*r)
 
 def exponential_over_r_fit(point_list):
     if type(point_list) != np.ndarray:
         point_list = np.array(point_list)
     a,b = sp.optimize.curve_fit(lambda r,a,b: a*math.e**(b*r)/r, point_list[:,0], point_list[:,1])[0]
+    if b > 0:
+        b = 0
     return lambda r: a*math.e**(b*r)/r
 
 #!!!use parareal
@@ -467,7 +471,7 @@ def Modified_Ixaru_Xi(pot_minus_lambda, delta):
             print("debbuging: value error for some reason")
             print(pot_minus_lambda)
             print(delta)
-            breakpoint()
+            #breakpoint()
             print(math.cos(delta * (abs(pot_minus_lambda)**.5)))
     else:
         return math.cosh(delta * ((pot_minus_lambda)**.5))
@@ -995,9 +999,11 @@ def Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p
     Bake_Sigma(sigma_of_r, double_coordinate_mesh)
     r_of_x = Make_Smart_Find_R_Given_X(Q_Integrand, double_coordinate_mesh)
     x_of_r = Make_Smart_Find_X_Given_R(Q_Integrand, double_coordinate_mesh)
-    #backup_sigma=sigma_of_r, backup_x_of_r=x_of_r, backup_r_of_x=r_of_x
-    #pot = Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=sigma_of_r, backup_x_of_r=x_of_r, backup_r_of_x=r_of_x, dx=dx)
-    pot = Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=None, backup_x_of_r=x_of_r, backup_r_of_x=r_of_x, dx=dx)
+    backup_sigma=sigma_of_r
+    backup_x_of_r=x_of_r
+    backup_r_of_x=r_of_x
+    pot = Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=sigma_of_r, backup_x_of_r=x_of_r, backup_r_of_x=r_of_x, dx=dx)
+    #pot = Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=None, backup_x_of_r=x_of_r, backup_r_of_x=r_of_x, dx=dx)
     bake_potentials_into_mesh(pot, double_coordinate_mesh, indep_var_mesh_key="x_mesh", disable_pbar=disable_pot_pbar)
     return double_coordinate_mesh
 
@@ -1202,7 +1208,7 @@ class MonotonizedFunc: #this is the way to make a function with memory. yes, the
                                 print(f"Fake jump at {coord}")
                                 this_monotonized_val = prev_monotonized_val
                     else:
-                        breakpoint()
+                        #breakpoint()
                         if try_the_buffer_length > 0:
                             passed = False
                             try_the_buffer_length -= 1
@@ -1422,19 +1428,21 @@ def find_candidate_roots(tailored_prufer, displacement_mag_quit_thresh=30, stop_
         warn("this shouldn't be possible")
         raise ArithmeticError #impossible condition, shouldn't have gotten here without returning already
 
-def find_stable_roots_in_mis_and_cpm_prufer(mis_and_cpm_prufer, target_index, sanity_check_tol=.1, sanity_check_step_for_zero_radius_pruf=.005, stop_at_candidate_roots_num_thresh=3, stop_at_total_steps_total_thresh=50, stop_at_total_steps_per_root_thresh=30, subsequent_root_agreement_tol=.001, interval_tol=.0001, pruf_mis_val_tol=.01, start_val=0, start_direction="right", start_step_mag=.001, step_mag_increase_factor=2, sustained_monotone_radius_factor_as_ratio_of_prev_step=.1, uni_directional_sustained_monotone_step_sample_count=3, sustained_monotone_success_sample_thresh=.75, fake_root_restart_movement_factor_as_ratio_of_start_step=1):
+def find_stable_roots_in_mis_and_cpm_prufer(mis_and_cpm_prufer, target_index, sanity_check_tol=50, sanity_check_step_for_zero_radius_pruf=.005, stop_at_candidate_roots_num_thresh=3, stop_at_total_steps_total_thresh=50, stop_at_total_steps_per_root_thresh=30, subsequent_root_agreement_tol=.001, interval_tol=.0001, pruf_mis_val_tol=.0005, start_val=0, start_direction="right", start_step_mag=.001, step_mag_increase_factor=2, sustained_monotone_radius_factor_as_ratio_of_prev_step=.1, uni_directional_sustained_monotone_step_sample_count=3, sustained_monotone_success_sample_thresh=.75, fake_root_restart_movement_factor_as_ratio_of_start_step=1):
     #breakpoint()
     mis = lambda lambda_: mis_and_cpm_prufer(lambda_)[0]
     tailored_prufer = lambda lambda_: mis_and_cpm_prufer(lambda_)[1] - target_index
     candidate_roots = find_candidate_roots(tailored_prufer, stop_at_candidate_roots_num_thresh=stop_at_candidate_roots_num_thresh, stop_at_total_steps_total_thresh=stop_at_total_steps_total_thresh, stop_at_total_steps_per_root_thresh=stop_at_total_steps_per_root_thresh, subsequent_root_agreement_tol=subsequent_root_agreement_tol, interval_tol=interval_tol, mis_val_tol=pruf_mis_val_tol, start_val=start_val, start_direction=start_direction, start_step_mag=start_step_mag, step_mag_increase_factor=step_mag_increase_factor, sustained_monotone_radius_factor_as_ratio_of_prev_step=sustained_monotone_radius_factor_as_ratio_of_prev_step, uni_directional_sustained_monotone_step_sample_count=uni_directional_sustained_monotone_step_sample_count, sustained_monotone_success_sample_thresh=sustained_monotone_success_sample_thresh, fake_root_restart_movement_factor_as_ratio_of_start_step=fake_root_restart_movement_factor_as_ratio_of_start_step)
     verified_roots = []
-    print("Testing Candidate Roots...")
-    for candidate_root in tqdm(candidate_roots):
+    #breakpoint()
+    for candidate_root in tqdm(candidate_roots, desc="Testing Candidate Roots..."):
         print(f"Testing {candidate_root}")
         #breakpoint()
         if abs(candidate_root[0]) != np.inf and ("no_root_found" not in candidate_root[2]):
             if abs(mis(candidate_root[0])) < sanity_check_tol:
+                print('Verified!')
                 verified_roots.append(candidate_root)
+                continue
 
             if abs(candidate_root[1]) == 0:
                 left_sanity_check, right_sanity_check = candidate_root[0] - sanity_check_step_for_zero_radius_pruf, candidate_root[0] + sanity_check_step_for_zero_radius_pruf
@@ -1445,9 +1453,12 @@ def find_stable_roots_in_mis_and_cpm_prufer(mis_and_cpm_prufer, target_index, sa
             sanity_check_signs = np.sign([left_sanity_result, right_sanity_result])
             same_sign_bool = sanity_check_signs[0]*sanity_check_signs[1]
             if same_sign_bool == -1:
+                print('Verified!')
                 verified_roots.append(candidate_root)
-
+            else:
+                print('Fake Root!')
         else:
+            print('Fake Root!')
             continue
 
     if len(verified_roots) == 0:
@@ -1780,7 +1791,7 @@ def radial(which_init=0, boundary_epsilon=.01, mid_r_start=1, mid_r_end=49, boun
     #breakpoint()
     #print("plotting")
     #generic_plot(np.arange(-.1251, -.124, .00025), lambda e: mis_eigen(e)[1])
-    generic_plot(np.arange(-.1261, -.03, .001), lambda e: mis_eigen(e)[1])
+    generic_plot(np.arange(-.1251, -.05, .01), lambda e: mis_eigen(e)[1])
     #generic_plot(np.arange(-.126, -.01, .001), lambda e: mis_eigen(e)[1]) 
     #breakpoint()
     #eig_out = mis_eigen(-.0625)

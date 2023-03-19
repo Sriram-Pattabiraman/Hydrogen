@@ -59,7 +59,7 @@ def Solve_For_Eigens(problem_funcs, x_start=None, x_end=None, baked_x_mesh_overr
     else:
         stable_root = lambda index: sl.find_stable_roots_in_mis_and_cpm_prufer(mis_eigen, index, stop_at_candidate_roots_num_thresh=stop_at_candidate_roots_num_thresh)[0][0]
     #breakpoint()
-    eigens = [stable_root(i) for i in tqdm(range(potentially_ad_hoc_start_eigen_index, get_eigens_up_to_n))]
+    eigens = [stable_root(i) for i in tqdm(range(potentially_ad_hoc_start_eigen_index, get_eigens_up_to_n), desc='Finding Eigens...')]
     eigens = list(filter( lambda x: (x!=None) and (not np.isnan(x)) , eigens))
     return eigens
 
@@ -444,7 +444,7 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     #azimuthal (magnetic quantum numbers) equation
     azi_problem = [lambda x: 1, lambda x: 0, lambda x: 1]
     azi_dx = .001
-    azi_liouville_n = 10
+    azi_liouville_n = 2
     bisect_tol = .001
     azi_mesh = np.arange(0, 2*math.pi, azi_dx)
     baked_azi_mesh = sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*azi_problem, azi_mesh, dx=azi_dx)
@@ -459,18 +459,18 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
 
     boundary_epsilon_theta = .001
     mesh_dtheta_left = .001
-    mesh_theta_mid_left = .1
+    mesh_theta_mid_left = .2
     mesh_dtheta_mid = .01
     mesh_theta_mid_right = .8
     mesh_dtheta_end = .001
-    theta_dx = .001
-    theta_liouville_n = 10
+    theta_liouville_sigma_dx = .01
+    theta_liouville_n = 2
     bisect_tol = .001
     theta_mesh = np.concatenate(np.array([np.arange(boundary_epsilon_theta, mesh_theta_mid_left, mesh_dtheta_left), np.arange(mesh_theta_mid_left, mesh_theta_mid_right, mesh_dtheta_mid), np.arange(mesh_theta_mid_right, math.pi-boundary_epsilon_theta, mesh_dtheta_end)], dtype=object))
-    baked_theta_mesh_given_azi_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*theta_problem_given_azi_eig(*prev_coord_eigens), theta_mesh, liouville_n=theta_liouville_n, dx=theta_dx)
+    baked_theta_mesh_given_azi_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*theta_problem_given_azi_eig(*prev_coord_eigens), theta_mesh, liouville_n=theta_liouville_n, dx=theta_liouville_sigma_dx)
     which_basis_init_vector_1 = which_basis_init_wronsks[1]
-    theta_eigens_given_azi_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(theta_problem_given_azi_eig(*prev_coord_eigens), baked_x_mesh_override=baked_theta_mesh_given_azi_eig(*prev_coord_eigens), mesh_dx=theta_dx, which_basis_init_vector=which_basis_init_vector_1, stop_at_candidate_roots_num_thresh=1, potentially_ad_hoc_start_eigen_index=1, liouville_n=theta_liouville_n, dx=theta_dx, bisect_tol=bisect_tol, get_eigens_up_to_n=3, parallel_pool=parallel_pool, force_monotone=False, force_monotone_start_val=-.1, stepping_from_anchor_dx=.001)
-    theta_eigen_func_given_azi_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(theta_problem_given_azi_eig(*prev_coord_eigens), theta_mesh[0], theta_mesh[-1], dx=theta_dx*(10**-2), which_basis_init_vector=which_basis_init_vector_1)
+    theta_eigens_given_azi_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(theta_problem_given_azi_eig(*prev_coord_eigens), baked_x_mesh_override=baked_theta_mesh_given_azi_eig(*prev_coord_eigens), which_basis_init_vector=which_basis_init_vector_1, stop_at_candidate_roots_num_thresh=1, potentially_ad_hoc_start_eigen_index=1, liouville_n=theta_liouville_n, dx=theta_liouville_sigma_dx, bisect_tol=bisect_tol, get_eigens_up_to_n=3, parallel_pool=parallel_pool, force_monotone=False, force_monotone_start_val=-.1, stepping_from_anchor_dx=.001)
+    theta_eigen_func_given_azi_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(theta_problem_given_azi_eig(*prev_coord_eigens), theta_mesh[0], theta_mesh[-1], dx=theta_liouville_sigma_dx*(10**-2), which_basis_init_vector=which_basis_init_vector_1)
 
 
     #radial
@@ -482,8 +482,8 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
 
     boundary_epsilon_radial = .01
     mid_r_start = 1
-    mid_r_end = 49
-    boundary_inf_approx = 50
+    mid_r_end = 99
+    boundary_inf_approx = 100 #!!!should be at least twice the desired plotting range - note that 50 suffices for eigenfinding but you need the twice the range thing for actually plotting eigenfunctions accurately. perhaps find a way to set two different values for this
     #p_of_r,q_of_r,w_of_r = lambda x: x**2, lambda x: l*(l+1) - ( ((2*reduced_mass*(x**2))/(hbar**2)) * ((electron_charge**2)/(4*math.pi*vaccuum_permittivity*x))  ), lambda x: ((2*reduced_mass*(x**2))/(hbar**2))
     #r_problem_given_theta_eig = lambda *prev_coord_eigens: [lambda x: 1, lambda x: prev_coord_eigens[1]/(x**2) - (1/x), lambda x: 1]
     r_problem_given_theta_eig = lambda *prev_coord_eigens: [lambda x: x**2, lambda x: prev_coord_eigens[1]-2*x, lambda x: 2*(x**2)]
@@ -494,14 +494,14 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     r_mesh_mid = np.arange(mid_r_start, mid_r_end, mesh_dr_mid)
     r_mesh_end = np.arange(mid_r_end, boundary_inf_approx, mesh_dr_end)
     r_mesh = np.concatenate([r_mesh_start, r_mesh_mid, r_mesh_end])
-    Num_D_sigma_dx = .0001
+    radial_Num_D_sigma_dx = .0001
     r_liouville_n = 2
-    baked_radial_mesh_given_theta_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*r_problem_given_theta_eig(*prev_coord_eigens), r_mesh, liouville_n=r_liouville_n, dx=Num_D_sigma_dx)
+    baked_radial_mesh_given_theta_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*r_problem_given_theta_eig(*prev_coord_eigens), r_mesh, liouville_n=r_liouville_n, dx=radial_Num_D_sigma_dx)
     which_basis_init_vector_2 = which_basis_init_wronsks[2]
     bisect_tol = .0001
     force_monotone = True
 
-    radial_eigens_given_theta_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(r_problem_given_theta_eig(*prev_coord_eigens), baked_x_mesh_override=baked_radial_mesh_given_theta_eig(*prev_coord_eigens), dx=Num_D_sigma_dx, which_basis_init_vector=which_basis_init_vector_2, bisect_tol=bisect_tol, parallel_pool=parallel_pool, force_monotone=force_monotone, force_monotone_start_val=-.13, stepping_from_anchor_dx=.001)
+    radial_eigens_given_theta_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(r_problem_given_theta_eig(*prev_coord_eigens), baked_x_mesh_override=baked_radial_mesh_given_theta_eig(*prev_coord_eigens), dx=radial_Num_D_sigma_dx, which_basis_init_vector=which_basis_init_vector_2, bisect_tol=bisect_tol, parallel_pool=parallel_pool, force_monotone=force_monotone, force_monotone_start_val=-.13, stepping_from_anchor_dx=.001)
     #breakpoint()
     #radial_eigen_func_given_theta_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(r_problem_given_theta_eig(*prev_coord_eigens), r_mesh[0], r_mesh[-1], dx=mesh_dr_start, which_basis_init_vector=which_basis_init_vector_2, asymptotic_clamping=True)
     radial_eigen_func_given_theta_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(r_problem_given_theta_eig(*prev_coord_eigens), r_mesh[0], r_mesh[-1], dx=mesh_dr_start, which_basis_init_vector=which_basis_init_vector_2, asymptotic_clamping=True)
@@ -511,10 +511,10 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     #breakpoint()
     for l in tqdm(range(0, 3)):
         for m in tqdm(range(-l, l+1)):
+            breakpoint()
             energy_list = radial_eigens_given_theta_eig(m**2, l*(l+1))
             n = l+1
             for energy in energy_list:
-                #breakpoint()
                 azi_func = interp_in_coord_out_arr(azi_eigen_func_given_eigen()(m**2))
                 #breakpoint()
                 theta_func = interp_in_coord_out_arr(theta_eigen_func_given_azi_eig(m**2)(l*(l+1)))
@@ -529,6 +529,7 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
                 point_cloud_plot(un_normed_probability_density, metropolis_starting_window=window, func_coord_system='spherical', window_coord_system='cartesian', num_points=10000, alpha=.0001, filename=f'{n}_{l}_{m}')
                 print('check result!')
                 fig, ax = plt.subplots()
+                ax.set_title(f"n,l,m={n},{l},{m}; energy={round(energy, 10)} hartrees")
                 ax.plot(np.arange(0,40,.0001), [(radial_func(r)**2) * (r**2) for r in np.arange(0,40,.0001)])
                 fig.savefig(f"Images/Radial_Probability_Densities/Prob_{n}_{l}_{m}")
                 
