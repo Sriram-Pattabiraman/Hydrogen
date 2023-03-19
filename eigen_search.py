@@ -35,7 +35,7 @@ import joblib
 VERBOSITY = 0
 
 
-def Solve_For_Eigens(problem_funcs, x_start=None, x_end=None, baked_x_mesh_override=None, mesh_dx=.05, which_basis_init_vector=0, stop_at_candidate_roots_num_thresh=5, potentially_ad_hoc_start_eigen_index=0, get_eigens_up_to_n=3, liouville_n=10, dx=.05, bisect_tol=.1, parallel_pool=None, force_monotone=False, force_monotone_start_val=-.1, stepping_from_anchor_dx=.001):
+def Solve_For_Eigens(problem_funcs, x_start=None, x_end=None, baked_x_mesh_override=None, mesh_dx=.05, which_basis_init_vector=0, stop_at_candidate_roots_num_thresh=5, get_eigens_up_to_n=3, potentially_ad_hoc_start_eigen_index=0, liouville_n=10, dx=.05, bisect_tol=.1, parallel_pool=None, force_monotone=False, force_monotone_start_val=-.1, stepping_from_anchor_dx=.001):
     basis_init_vectors = [0,1], [1,0]
 
     if parallel_pool is None:
@@ -430,11 +430,12 @@ def point_cloud_plot(un_normed_probability_density, metropolis_starting_window=[
     if window_coord_system == 'cartesian':
         cartesian_un_normed_prob_density = lambda x,y,z: un_normed_probability_density(*convert_coord([x,y,z], from_system='cartesian', out_system=func_coord_system))
         
-        points, total_state_list = metropolis_hastings(cartesian_un_normed_prob_density, starting_window=metropolis_starting_window, run_time=num_points*10, sample_size=num_points)
+        points = metropolis_hastings(cartesian_un_normed_prob_density, starting_window=metropolis_starting_window, run_time=num_points, sample_size=None)
         
         fig, ax = plot3D_point_list(points, fig=fig, ax=ax, alpha=alpha)
         if filename is not None:
-            fig.savefig(f"Images/Point_Clouds/{filename}")
+            fig.savefig(f"Images/Point_Clouds/{filename}.png")
+            fig.savefig(f"Images/Point_Clouds/{filename}.svg")
         return fig,ax
             
     
@@ -480,8 +481,8 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
 
     boundary_epsilon_radial = .01
     mid_r_start = 1
-    mid_r_end = 99
-    boundary_inf_approx = 100 #!!!should be at least twice the desired plotting range - note that 50 suffices for eigenfinding but you need the twice the range thing for actually plotting eigenfunctions accurately. perhaps find a way to set two different values for this
+    mid_r_end = 49
+    boundary_inf_approx = 50 #!!!should be at least twice the desired plotting range - note that 50 suffices for eigenfinding but you need the twice the range thing for actually plotting eigenfunctions accurately. perhaps find a way to set two different values for this
     #p_of_r,q_of_r,w_of_r = lambda x: x**2, lambda x: l*(l+1) - ( ((2*reduced_mass*(x**2))/(hbar**2)) * ((electron_charge**2)/(4*math.pi*vaccuum_permittivity*x))  ), lambda x: ((2*reduced_mass*(x**2))/(hbar**2))
     #r_problem_given_theta_eig = lambda *prev_coord_eigens: [lambda x: 1, lambda x: prev_coord_eigens[1]/(x**2) - (1/x), lambda x: 1]
     r_problem_given_theta_eig = lambda *prev_coord_eigens: [lambda x: x**2, lambda x: prev_coord_eigens[1]-2*x, lambda x: 2*(x**2)]
@@ -498,8 +499,10 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     which_basis_init_vector_2 = which_basis_init_wronsks[2]
     bisect_tol = .0001
     force_monotone = True
+    rad_stop_at_candidate_roots_num_thresh = 10
+    rad_get_eigens_up_to_n = 5
 
-    radial_eigens_given_theta_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(r_problem_given_theta_eig(*prev_coord_eigens), baked_x_mesh_override=baked_radial_mesh_given_theta_eig(*prev_coord_eigens), dx=radial_Num_D_sigma_dx, which_basis_init_vector=which_basis_init_vector_2, bisect_tol=bisect_tol, parallel_pool=parallel_pool, force_monotone=force_monotone, force_monotone_start_val=-.13, stepping_from_anchor_dx=.001)
+    radial_eigens_given_theta_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(r_problem_given_theta_eig(*prev_coord_eigens), baked_x_mesh_override=baked_radial_mesh_given_theta_eig(*prev_coord_eigens), stop_at_candidate_roots_num_thresh=rad_stop_at_candidate_roots_num_thresh, get_eigens_up_to_n=rad_get_eigens_up_to_n, dx=radial_Num_D_sigma_dx, which_basis_init_vector=which_basis_init_vector_2, bisect_tol=bisect_tol, parallel_pool=parallel_pool, force_monotone=force_monotone, force_monotone_start_val=-.13, stepping_from_anchor_dx=.001)
     #breakpoint()
     #radial_eigen_func_given_theta_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(r_problem_given_theta_eig(*prev_coord_eigens), r_mesh[0], r_mesh[-1], dx=mesh_dr_start, which_basis_init_vector=which_basis_init_vector_2, asymptotic_clamping=True)
     radial_eigen_func_given_theta_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(r_problem_given_theta_eig(*prev_coord_eigens), r_mesh[0], r_mesh[-1], dx=mesh_dr_start, which_basis_init_vector=which_basis_init_vector_2, asymptotic_clamping=True)
@@ -520,16 +523,17 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
                 radial_func = interp_in_coord_out_arr(np.array(radial_eigen_func_given_theta_eig(m**2,l*(l+1))(energy)))
                 hopefully_hydrogen_wave_function = lambda r, phi, theta: hopefully_real_sph_harm(phi, theta) * radial_func(r)
                 #breakpoint()
-                end_of_radius = 5*(n**2)
+                end_of_radius = min(2*(n**2)+l), (40)
                 window = [[-end_of_radius, end_of_radius],[-end_of_radius, end_of_radius],[-end_of_radius, end_of_radius]]
                 un_normed_probability_density = lambda r, phi, theta: hopefully_hydrogen_wave_function(r, phi, theta)**2
                 
-                #fig, ax = plt.subplots()
-                #ax.set_title(f"n,l,m={n},{l},{m}; energy={round(energy, 10)} hartrees")
-                #ax.plot(np.arange(0,end_of_radius,.0001), [(radial_func(r)**2) * (r**2) for r in np.arange(0,end_of_radius,.0001)])
-                #fig.savefig(f"Images/Radial_Probability_Densities/Prob_{n}_{l}_{m}")
+                fig, ax = plt.subplots()
+                ax.set_title(f"n,l,m={n},{l},{m}; energy={round(energy, 10)} hartrees")
+                ax.plot(np.arange(0,end_of_radius,.0001), [(radial_func(r)**2) * (r**2) for r in np.arange(0,end_of_radius,.0001)], '.')
+                fig.savefig(f"Images/Radial_Probability_Densities/Rad_Prob_{n}_{l}_{m}.png")
+                fig.savefig(f"Images/Radial_Probability_Densities/Rad_Prob_{n}_{l}_{m}.svg")
                 
-                point_cloud_plot(un_normed_probability_density, metropolis_starting_window=window, func_coord_system='spherical', window_coord_system='cartesian', num_points=10000, alpha=.1, filename=f'{n}_{l}_{m}')
+                point_cloud_plot(un_normed_probability_density, metropolis_starting_window=window, func_coord_system='spherical', window_coord_system='cartesian', num_points=10000, alpha=.1, filename=f'Orbital_{n}_{l}_{m}')
                 print('check result!')
 
                 

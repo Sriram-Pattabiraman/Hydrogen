@@ -265,7 +265,7 @@ def exponential_fit(point_list):
         point_list = np.array(point_list)
     a,b = sp.optimize.curve_fit(lambda r,a,b: a*math.e**(b*r), point_list[:,0], point_list[:,1])[0]
     if b > 0:
-        b = 0
+        return lambda r: r
     return lambda r: a*math.e**(b*r)
 
 def exponential_over_r_fit(point_list):
@@ -273,7 +273,7 @@ def exponential_over_r_fit(point_list):
         point_list = np.array(point_list)
     a,b = sp.optimize.curve_fit(lambda r,a,b: a*math.e**(b*r)/r, point_list[:,0], point_list[:,1])[0]
     if b > 0:
-        b = 0
+        return lambda r: r
     return lambda r: a*math.e**(b*r)/r
 
 #!!!use parareal
