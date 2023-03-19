@@ -1140,7 +1140,7 @@ class MonotonizedFunc: #this is the way to make a function with memory. yes, the
                             if passed:
                                 this_monotonized_val = prev_monotonized_val + abs(func_diff)
                             else:
-                                input(f"Fake jump at {coord}")
+                                print(f"Fake jump at {coord}")
                                 this_monotonized_val = prev_monotonized_val
                     else:
                         #breakpoint()
@@ -1168,7 +1168,7 @@ class MonotonizedFunc: #this is the way to make a function with memory. yes, the
                         if passed:
                             this_monotonized_val = prev_monotonized_val + abs(func_diff)
                         else:
-                            input(f"Fake jump at {coord}")
+                            print(f"Fake jump at {coord}")
                             this_monotonized_val = prev_monotonized_val
                 elif which_is_anchor == 'upper': #!!!generalize for monotone down
                     if func_diff <= 0:
@@ -1199,7 +1199,7 @@ class MonotonizedFunc: #this is the way to make a function with memory. yes, the
                             if passed:
                                 this_monotonized_val = prev_monotonized_val - abs(func_diff)
                             else:
-                                input(f"Fake jump at {coord}")
+                                print(f"Fake jump at {coord}")
                                 this_monotonized_val = prev_monotonized_val
                     else:
                         breakpoint()
@@ -1227,7 +1227,7 @@ class MonotonizedFunc: #this is the way to make a function with memory. yes, the
                         if passed:
                             this_monotonized_val = prev_monotonized_val - abs(func_diff)
                         else:
-                            input(f"Fake jump at {coord}")
+                            print(f"Fake jump at {coord}")
                             this_monotonized_val = prev_monotonized_val
                 self.known_indep_var_coords = np.insert(self.known_indep_var_coords, this_insertion_index, coord)
                 self.known_monotonized_and_non_monotonized_vals = np.insert(self.known_monotonized_and_non_monotonized_vals, this_insertion_index, [this_monotonized_val, this_func_val], axis=0)
