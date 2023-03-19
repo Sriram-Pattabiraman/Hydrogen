@@ -599,8 +599,8 @@ def Bake_Local_Scaling_Factors(baked_mesh, global_scaling_factor, lambda_, indep
 def Adjust_Prufer_Angle(unadjusted_angle, rescaling_ratio): #rescaling ratio is new_scale/old_scale, and is denoted in many sources (pyrce, ledoux) as "\sigma", not to be confused with the unrelated "\sigma" used in the Liouville transformation.
     return unadjusted_angle + math.atan2((rescaling_ratio-1)*math.sin(rescaling_ratio)*math.cos(rescaling_ratio), 1 + (rescaling_ratio - 1) * (math.sin(rescaling_ratio)**2))
 
-DEFAULT_AD_HOC_PI_EPSILON = .01
-def Constricted_Looping_Monotone_Angle_To_Total_Monotone_Angle(current_total_monotone_angle, constricted_looping_monotone_angle, prev_constricted_looping_monotone_angle, direction="up"): #constricted_looping_monotone_angle constricted between -\pi/2, \pi/2,  monotone increasing but loops
+#ad_hoc_pi_epsilon=.01
+def Constricted_Looping_Monotone_Angle_To_Total_Monotone_Angle(current_total_monotone_angle, constricted_looping_monotone_angle, prev_constricted_looping_monotone_angle, ad_hoc_pi_epsilon=.001, direction="up"): #constricted_looping_monotone_angle constricted between -\pi/2, \pi/2,  monotone increasing but loops
     intra_loop_angle_delta = constricted_looping_monotone_angle - prev_constricted_looping_monotone_angle
     '''
     if min(abs(intra_loop_angle_delta), abs(prev_intra_loop_angle_delta)) > abs(first_last_intra_loop_angle_delta):
@@ -615,7 +615,7 @@ def Constricted_Looping_Monotone_Angle_To_Total_Monotone_Angle(current_total_mon
         intra_loop_angle_delta = constricted_looping_monotone_angle - potentially_spiked_prev_constricted_looping_monotone_angle
     '''
 
-    if abs(intra_loop_angle_delta) < math.pi - DEFAULT_AD_HOC_PI_EPSILON:
+    if abs(intra_loop_angle_delta) < math.pi - ad_hoc_pi_epsilon:
         current_total_monotone_angle += intra_loop_angle_delta
         return current_total_monotone_angle
 
@@ -655,7 +655,8 @@ def Constricted_Looping_Monotone_Angle_To_Total_Monotone_Angle(current_total_mon
 
 def Step_Prufer_Left_Forward(baked_mesh, current_prufer_left, prev_intra_loop_angle_left, left_index, global_scaling_factor, current_left_shot_vector, next_left_shot_vector):
     local_scaling_factor = baked_mesh["local_scaling_factor_left_mesh"][left_index]
-    if local_scaling_factor=="Barrier Case!": #barrier case: E<=V
+    #breakpoint()
+    if local_scaling_factor=="Barrier Case!" and False: #barrier case: E<=V
         raw_end_theta = math.atan2(global_scaling_factor*next_left_shot_vector[0], next_left_shot_vector[1])
         prufer_left_global = math.atan2(global_scaling_factor*current_left_shot_vector[0], current_left_shot_vector[1])
         if (current_left_shot_vector[0] == 0 or next_left_shot_vector[0] == 0) or (current_left_shot_vector[0] > 0 and next_left_shot_vector[0] > 0) or (current_left_shot_vector[0] < 0 and next_left_shot_vector[0] < 0):
@@ -675,6 +676,10 @@ def Step_Prufer_Left_Forward(baked_mesh, current_prufer_left, prev_intra_loop_an
         return new_total_prufer_right, final_right_angle
 
     else: #well case: E>V
+        if local_scaling_factor == "Barrier Case!":
+            local_scaling_factor = 1
+        
+        
         #ledoux uses "atan", but it should be "atan2" - this is probably just her forgetting to clarify or assuming the reader implicitly understood that fact.
         linear_unadjusted_right_angle = local_scaling_factor * baked_mesh["delta_forward_mesh"][left_index] + math.atan2(local_scaling_factor*current_left_shot_vector[0], current_left_shot_vector[1])
         end_constant_corrector = math.atan2(local_scaling_factor*next_left_shot_vector[0], next_left_shot_vector[1])
@@ -760,13 +765,11 @@ def Step_Prufer_Right_Backward(baked_mesh, current_prufer_right, prev_intra_loop
         return new_total_prufer_left, final_left_angle,
 
 
-def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vector, lambda_, indep_var_mesh_key="mesh", indep_var_mesh_key_for_history_override=None, matching_point_index=None, disable_delta_forward_baking_pbar=True, disable_prop_baking_pbar=True, disable_shooting_pbar=False, disable_local_scaling_factors_baking_pbar=True, store_solution=False, parallel_pool=None): #takes in the prop_mats for a schrodinger problem and the full_shot_vector is the initial shot at both endpoints giving left then right in a single vector. baked_mesh has a bunch of information, including the mesh itself, and is a dictionary so that i don't forget what the things are. #!!!stubby top down code this stuff.
+def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vector, lambda_, indep_var_mesh_key="mesh", indep_var_mesh_key_for_history_override=None, matching_point_index=None, disable_delta_forward_baking_pbar=True, disable_prop_baking_pbar=True, disable_shooting_pbar=False, disable_local_scaling_factors_baking_pbar=True, store_solution=False, parallel_pool=None, adhoc_two=False): #takes in the prop_mats for a schrodinger problem and the full_shot_vector is the initial shot at both endpoints giving left then right in a single vector. baked_mesh has a bunch of information, including the mesh itself, and is a dictionary so that i don't forget what the things are.
     if indep_var_mesh_key_for_history_override is None:
         indep_var_mesh_key_for_history_override = indep_var_mesh_key
     if parallel_pool is None:
         parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
-    #!!!implement energy derivative tracking for newton's method
-    #!!!see if newton's method is actually more practical than bisection here
     if "delta_forward_mesh" not in baked_mesh.keys():
         Bake_Delta_Forward(baked_mesh, indep_var_mesh_key=indep_var_mesh_key, disable_pbar=disable_delta_forward_baking_pbar)
 
@@ -797,12 +800,12 @@ def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vecto
     logical_index = 0
     prev_looping_angle_left = 0
     prev_looping_angle_right = 0
-    if not disable_shooting_pbar:
-        print("Shooting...")
+    #if not disable_shooting_pbar:
+    #    print("Shooting...")
 
     if store_solution:
         history_left, history_right = [np.array([baked_mesh[indep_var_mesh_key_for_history_override][0], *current_left_shot_vector])], [np.array([baked_mesh[indep_var_mesh_key_for_history_override][-1], *current_right_shot_vector])]
-    with tqdm(total=max(matching_point_index-left_index, right_index-matching_point_index), disable=disable_shooting_pbar) as pbar:
+    with tqdm(desc='Shooting...', total=max(matching_point_index-left_index, right_index-matching_point_index), disable=disable_shooting_pbar) as pbar:
         while left_index < matching_point_index and right_index > matching_point_index:
             #print('prufers:',end='')
             #print(current_prufer_left, current_prufer_right) #!!!probably sign error
@@ -841,6 +844,8 @@ def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vecto
     #print(f'diffs: {final_left_prufer} and {final_right_prufer}')
     #print(f'ending prufs shots: {final_left_prufer}, {final_right_prufer}')
     eigen_index = theta_diff/(2*math.pi)
+    if adhoc_two:
+        eigen_index *= 2
     if store_solution:
         #breakpoint()
         history_right.reverse()
@@ -904,11 +909,11 @@ def Make_Liouville_Q_Integrand(p_of_r, w_of_r):#this is the integrand used to do
     #!!!store this in a baked mesh, do the custom liouville integration baked into the mesh, as these are all energy independent values.
     return lambda r: (w_of_r(r)/p_of_r(r))**.5
 
-def Dumb_Double_Mesh_Make(Q_Integrand, r_mesh, disable_coord_pbar=False):
+def Dumb_Double_Mesh_Make(Q_Integrand, r_mesh, liouville_n=10, disable_coord_pbar=False):
     double_coordinate_mesh = {"r_mesh": r_mesh}
     x_vals = [0.0]
     for left_indice in tqdm(range(len(double_coordinate_mesh["r_mesh"])-1), desc="Making double_coordinate_mesh...", disable=disable_coord_pbar):
-        net_change_in_x = (Custom_Liouville_Integration(Q_Integrand,r_mesh[left_indice],r_mesh[left_indice+1])) #also called Q.
+        net_change_in_x = Custom_Liouville_Integration(Q_Integrand,r_mesh[left_indice],r_mesh[left_indice+1], n=liouville_n) #also called Q.
         x_vals.append(x_vals[-1]+net_change_in_x)
     double_coordinate_mesh["x_mesh"] = x_vals
     return double_coordinate_mesh
@@ -983,31 +988,284 @@ def Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=None, backup_x_of_r
             return q_of_r(r)/w_of_r(r) + backup_sigma(r) * NumD(NumD(lambda x: 1/backup_sigma(x), dx, cmp_step=False), dx, cmp_step=False)(baked_mesh[x_var_mesh_name][indice])
     return pot_of_x
 
-def Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p_of_r, q_of_r, w_of_r, r_mesh, dx=.001, disable_pot_pbar=False, disable_coord_pbar=False):
+def Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p_of_r, q_of_r, w_of_r, r_mesh, liouville_n=10, dx=.001, disable_pot_pbar=False, disable_coord_pbar=False):
     Q_Integrand = Make_Liouville_Q_Integrand(p_of_r, w_of_r)
-    double_coordinate_mesh = Dumb_Double_Mesh_Make(Q_Integrand, r_mesh, disable_coord_pbar=disable_coord_pbar)
+    double_coordinate_mesh = Dumb_Double_Mesh_Make(Q_Integrand, r_mesh, liouville_n=liouville_n, disable_coord_pbar=disable_coord_pbar)
     sigma_of_r = Make_Liouville_Sigma_Given_R(p_of_r, w_of_r)
     Bake_Sigma(sigma_of_r, double_coordinate_mesh)
     r_of_x = Make_Smart_Find_R_Given_X(Q_Integrand, double_coordinate_mesh)
     x_of_r = Make_Smart_Find_X_Given_R(Q_Integrand, double_coordinate_mesh)
     #backup_sigma=sigma_of_r, backup_x_of_r=x_of_r, backup_r_of_x=r_of_x
-    pot = Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=sigma_of_r, backup_x_of_r=x_of_r, backup_r_of_x=r_of_x, dx=dx)
+    #pot = Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=sigma_of_r, backup_x_of_r=x_of_r, backup_r_of_x=r_of_x, dx=dx)
+    pot = Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=None, backup_x_of_r=x_of_r, backup_r_of_x=r_of_x, dx=dx)
     bake_potentials_into_mesh(pot, double_coordinate_mesh, indep_var_mesh_key="x_mesh", disable_pbar=disable_pot_pbar)
     return double_coordinate_mesh
 
-def CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, mesh_was_already_baked=False, dx=.001, disable_shooting_pbar=True, disable_pot_pbar=False, disable_coord_pbar=False, disable_local_scaling_factors_baking_pbar=True, store_solution=False, parallel_pool=None):
+def find_surrounding_indice_in_mono_arr(val, arr, use_ends_of_arr_if_not_in_arr=True):
+    if val <= arr[0]:
+        if use_ends_of_arr_if_not_in_arr:
+            return [0, 0]
+        else:
+            raise ValueError("Val not in arr!")
+    elif arr[-1] < val:
+        if use_ends_of_arr_if_not_in_arr:
+            return [len(arr)-1, len(arr)-1]
+        else:
+            raise ValueError("Val not in arr!")
+    else:
+        i = np.searchsorted(arr, val, side="left")
+        return (i-1, i)
+    
+def find_indices_given_coords(coords, arrs):
+    return [find_surrounding_indice_in_mono_arr(coords[i], arrs[i]) for i in range(len(coords))]
+
+class MonotonizedFunc: #this is the way to make a function with memory. yes, the break from the functional-style of the rest of this code irks me too.    
+    #!!!assumes monotone up - generalize this
+    #!!!assumes known lists are sorted
+    def __init__(self, func, index_to_monotonize=None, start_val=-.1, known_indep_var_coords=np.array([], dtype=np.float64), known_monotonized_and_non_monotonized_vals=np.empty((0,2), dtype=np.float64), other_indices_func_outs=np.empty((0,0)), stepping_from_anchor_dx=.001, sustain_thresh=5, is_a_jump_thresh=.45, disable_scaffold_climbing_pbar=False):  
+        #breakpoint()
+        insertion_index = known_indep_var_coords.searchsorted(start_val)
+        if len(known_indep_var_coords)==0 or (known_indep_var_coords[insertion_index] != start_val and (insertion_index==0 or known_indep_var_coords[insertion_index-1])):
+            known_indep_var_coords = np.insert(known_indep_var_coords, insertion_index, start_val)
+            raw_start_func_val = func(start_val)
+            if index_to_monotonize is not None:
+                raw_start_func_val = list(raw_start_func_val)
+            start_func_val = raw_start_func_val if index_to_monotonize is None else raw_start_func_val.pop(index_to_monotonize)
+            if index_to_monotonize is not None:
+                #breakpoint()
+                if len(other_indices_func_outs) == 0:
+                    other_indices_func_outs = np.array([raw_start_func_val])
+                else:  
+                    other_indices_func_outs = np.insert(other_indices_func_outs, insertion_index, raw_start_func_val, axis=0)
+            
+            known_monotonized_and_non_monotonized_vals = np.insert(known_monotonized_and_non_monotonized_vals, insertion_index, [start_func_val, start_func_val], axis=0)
+        
+        self.base_func = func
+        self.index_to_monotonize = index_to_monotonize
+        self.start_val = start_val
+        self.stepping_from_anchor_dx = stepping_from_anchor_dx
+        self.known_indep_var_coords = known_indep_var_coords
+        self.known_monotonized_and_non_monotonized_vals = known_monotonized_and_non_monotonized_vals
+        if index_to_monotonize is not None:
+            self.other_indices_func_outs = other_indices_func_outs
+        self.sustain_thresh = sustain_thresh
+        self.is_a_jump_thresh = is_a_jump_thresh
+        self.disable_scaffold_climbing_pbar = disable_scaffold_climbing_pbar
+        
+    def __call__(self, indep_var):
+        #breakpoint()
+        insertion_index = self.known_indep_var_coords.searchsorted(indep_var)
+        
+        if insertion_index == len(self.known_indep_var_coords):
+            upper_coord = np.inf
+        else:
+            upper_coord = self.known_indep_var_coords[insertion_index]
+            
+        if insertion_index > 0:
+            lower_coord = self.known_indep_var_coords[insertion_index-1]
+        else:
+            lower_coord = -np.inf
+        
+        
+        if upper_coord == indep_var:
+            if self.index_to_monotonize is None:
+                return self.known_monotonized_and_non_monotonized_vals[insertion_index][0]
+            else:
+                out_at_monotonized_index = self.known_monotonized_and_non_monotonized_vals[insertion_index][0]
+                other_outs =  self.other_indices_func_outs[insertion_index]
+                all_outs = np.insert(other_outs, self.index_to_monotonize, out_at_monotonized_index)
+                return all_outs
+        elif lower_coord == indep_var:
+            if self.index_to_monotonize is None:
+                return self.known_monotonized_and_non_monotonized_vals[insertion_index-1][0]
+            else:
+                out_at_monotonized_index = self.known_monotonized_and_non_monotonized_vals[insertion_index-1][0]
+                other_outs =  self.other_indices_func_outs[insertion_index-1]
+                all_outs = np.insert(other_outs, self.index_to_monotonize, out_at_monotonized_index)
+                return all_outs
+                
+        else:
+            lower_coord_diff = indep_var - lower_coord
+            upper_coord_diff = indep_var - upper_coord
+            if abs(lower_coord_diff) <= abs(upper_coord_diff):
+                which_is_anchor, anchor_coord = 'lower', lower_coord,
+            else:
+                which_is_anchor, anchor_coord = 'upper', upper_coord
+            
+            scaffolding_coords = np.arange(anchor_coord, indep_var, self.stepping_from_anchor_dx)[1:]
+            if len(scaffolding_coords) == 0 or scaffolding_coords[-1] != indep_var:
+                scaffolding_coords = np.append(scaffolding_coords, indep_var)
+            
+            prev_coord_index = insertion_index + (-1 if which_is_anchor=='lower' else 0)
+            this_insertion_index = insertion_index
+            buffered_next_func_vals_for_sustain_testing = []
+            buffered_next_other_indices_vals_for_sustain_testing = []
+            try_the_buffer_length=0
+            for coord in tqdm(scaffolding_coords, desc="Climbing Monotone Scaffolding...", disable=self.disable_scaffold_climbing_pbar):
+                if try_the_buffer_length > 0:
+                    this_func_val = buffered_next_func_vals_for_sustain_testing.pop(0)
+                    raw_this_func_val = buffered_next_other_indices_vals_for_sustain_testing.pop(0)
+                    try_the_buffer_length -= 1
+                else:
+                    raw_this_func_val = list(self.base_func(coord)) if self.index_to_monotonize is not None else self.base_func(coord)
+                    this_func_val = raw_this_func_val.pop(self.index_to_monotonize) if self.index_to_monotonize is not None else raw_this_func_val
+                prev_monotonized_val, prev_non_monotonized_val = self.known_monotonized_and_non_monotonized_vals[prev_coord_index]
+                func_diff = this_func_val - prev_non_monotonized_val
+                if which_is_anchor == 'lower': #!!!generalize for monotone down
+                    if func_diff >= 0:
+                        if func_diff < self.is_a_jump_thresh:
+                            this_monotonized_val = prev_monotonized_val + abs(func_diff)
+                        else:
+                            if try_the_buffer_length > 0:
+                                passed = False
+                                try_the_buffer_length -= 1
+                            else:
+                                buffered_next_func_vals_for_sustain_testing = []
+                                buffered_next_other_indices_vals_for_sustain_testing = []
+                                passed = True
+                                prev_sustain_test_func_val = this_func_val
+                                for x in np.append(np.arange(coord, coord+self.sustain_thresh*self.stepping_from_anchor_dx, self.stepping_from_anchor_dx)[1:], coord+self.sustain_thresh*self.stepping_from_anchor_dx):
+                                    raw_sustain_test_val = list(self.base_func(x)) if self.index_to_monotonize is not None else self.base_func(coord)
+                                    this_sustain_test_val = raw_sustain_test_val.pop(self.index_to_monotonize) if self.index_to_monotonize is not None else raw_sustain_test_val
+                                    buffered_next_func_vals_for_sustain_testing.append(this_sustain_test_val)
+                                    buffered_next_other_indices_vals_for_sustain_testing.append(raw_sustain_test_val)
+                                    sustain_test_func_diff = this_sustain_test_val - prev_sustain_test_func_val
+                                    if abs(sustain_test_func_diff) > self.is_a_jump_thresh or sustain_test_func_diff < 0:
+                                        passed = False
+                                        break
+                                    prev_sustain_test_func_val = this_sustain_test_val
+                                    
+                                try_the_buffer_length = len(buffered_next_func_vals_for_sustain_testing)
+                            
+                            if passed:
+                                this_monotonized_val = prev_monotonized_val + abs(func_diff)
+                            else:
+                                input(f"Fake jump at {coord}")
+                                this_monotonized_val = prev_monotonized_val
+                    else:
+                        #breakpoint()
+                        if try_the_buffer_length > 0:
+                            passed = False
+                            try_the_buffer_length -= 1
+                        else:
+                            buffered_next_func_vals_for_sustain_testing = []
+                            buffered_next_other_indices_vals_for_sustain_testing = []
+                            passed = True
+                            prev_sustain_test_func_val = this_func_val
+                            for x in np.append(np.arange(coord, coord+self.sustain_thresh*self.stepping_from_anchor_dx, self.stepping_from_anchor_dx)[1:], coord+self.sustain_thresh*self.stepping_from_anchor_dx):
+                                raw_sustain_test_val = list(self.base_func(x)) if self.index_to_monotonize is not None else self.base_func(coord)
+                                this_sustain_test_val = raw_sustain_test_val.pop(self.index_to_monotonize) if self.index_to_monotonize is not None else raw_sustain_test_val
+                                buffered_next_func_vals_for_sustain_testing.append(this_sustain_test_val)
+                                buffered_next_other_indices_vals_for_sustain_testing.append(raw_sustain_test_val)
+                                sustain_test_func_diff = this_sustain_test_val - prev_sustain_test_func_val
+                                if abs(sustain_test_func_diff) > self.is_a_jump_thresh or sustain_test_func_diff < 0:
+                                    passed = False
+                                    break
+                                prev_sustain_test_func_val = this_sustain_test_val
+                                
+                            try_the_buffer_length = len(buffered_next_func_vals_for_sustain_testing)
+                        
+                        if passed:
+                            this_monotonized_val = prev_monotonized_val + abs(func_diff)
+                        else:
+                            input(f"Fake jump at {coord}")
+                            this_monotonized_val = prev_monotonized_val
+                elif which_is_anchor == 'upper': #!!!generalize for monotone down
+                    if func_diff <= 0:
+                        if func_diff > self.is_a_jump_thresh:
+                            this_monotonized_val = prev_monotonized_val - abs(func_diff)
+                        else:
+                            if try_the_buffer_length > 0:
+                                passed = False
+                                try_the_buffer_length -= 1
+                            else:
+                                buffered_next_func_vals_for_sustain_testing = []
+                                buffered_next_other_indices_vals_for_sustain_testing = []
+                                passed = True
+                                prev_sustain_test_func_val = this_func_val
+                                for x in np.append(np.arange(coord, coord-self.sustain_thresh*self.stepping_from_anchor_dx, -self.stepping_from_anchor_dx)[1:], coord-self.sustain_thresh*self.stepping_from_anchor_dx):
+                                    raw_sustain_test_val = list(self.base_func(x)) if self.index_to_monotonize is not None else self.base_func(coord)
+                                    this_sustain_test_val = raw_sustain_test_val.pop(self.index_to_monotonize) if self.index_to_monotonize is not None else raw_sustain_test_val
+                                    buffered_next_func_vals_for_sustain_testing.append(this_sustain_test_val)
+                                    buffered_next_other_indices_vals_for_sustain_testing.append(raw_sustain_test_val)
+                                    sustain_test_func_diff = this_sustain_test_val - prev_sustain_test_func_val
+                                    if abs(sustain_test_func_diff) > self.is_a_jump_thresh or sustain_test_func_diff > 0:
+                                        passed = False
+                                        break
+                                    prev_sustain_test_func_val = this_sustain_test_val
+                                    
+                                try_the_buffer_length = len(buffered_next_func_vals_for_sustain_testing)
+                                
+                            if passed:
+                                this_monotonized_val = prev_monotonized_val - abs(func_diff)
+                            else:
+                                input(f"Fake jump at {coord}")
+                                this_monotonized_val = prev_monotonized_val
+                    else:
+                        breakpoint()
+                        if try_the_buffer_length > 0:
+                            passed = False
+                            try_the_buffer_length -= 1
+                        else:
+                            buffered_next_func_vals_for_sustain_testing = []
+                            buffered_next_other_indices_vals_for_sustain_testing = []
+                            passed = True
+                            prev_sustain_test_func_val = this_func_val
+                            for x in np.append(np.arange(coord, coord-self.sustain_thresh*self.stepping_from_anchor_dx, -self.stepping_from_anchor_dx)[1:], coord-self.sustain_thresh*self.stepping_from_anchor_dx):
+                                raw_sustain_test_val = list(self.base_func(x)) if self.index_to_monotonize is not None else self.base_func(coord)
+                                this_sustain_test_val = raw_sustain_test_val.pop(self.index_to_monotonize) if self.index_to_monotonize is not None else raw_sustain_test_val
+                                buffered_next_func_vals_for_sustain_testing.append(this_sustain_test_val)
+                                buffered_next_other_indices_vals_for_sustain_testing.append(raw_sustain_test_val)
+                                sustain_test_func_diff = this_sustain_test_val - prev_sustain_test_func_val
+                                if abs(sustain_test_func_diff) > .5 or sustain_test_func_diff > 0:
+                                    passed = False
+                                    break
+                                prev_sustain_test_func_val = this_sustain_test_val
+                                
+                            try_the_buffer_length = len(buffered_next_func_vals_for_sustain_testing)
+                            
+                        if passed:
+                            this_monotonized_val = prev_monotonized_val - abs(func_diff)
+                        else:
+                            input(f"Fake jump at {coord}")
+                            this_monotonized_val = prev_monotonized_val
+                self.known_indep_var_coords = np.insert(self.known_indep_var_coords, this_insertion_index, coord)
+                self.known_monotonized_and_non_monotonized_vals = np.insert(self.known_monotonized_and_non_monotonized_vals, this_insertion_index, [this_monotonized_val, this_func_val], axis=0)
+                if self.index_to_monotonize is not None:
+                    self.other_indices_func_outs = np.insert(self.other_indices_func_outs, this_insertion_index, raw_this_func_val, axis=0)
+                
+                if which_is_anchor == 'lower':
+                    prev_coord_index += 1
+                    this_insertion_index += 1
+                elif which_is_anchor == 'upper':
+                    continue
+                
+              
+            if self.index_to_monotonize is None:
+                return self.known_monotonized_and_non_monotonized_vals[prev_coord_index][0]
+            else:
+                out_at_monotonized_index = self.known_monotonized_and_non_monotonized_vals[prev_coord_index][0]
+                other_outs =  self.other_indices_func_outs[prev_coord_index]
+                all_outs = np.insert(other_outs, self.index_to_monotonize, out_at_monotonized_index)
+                return all_outs
+
+
+def CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, mesh_was_already_baked=False, liouville_n=10, dx=.001, disable_shooting_pbar=True, disable_pot_pbar=False, disable_coord_pbar=False, disable_local_scaling_factors_baking_pbar=True, store_solution=False, parallel_pool=None, adhoc_two=False, force_monotone=False, force_monotone_start_val=-.1, stepping_from_anchor_dx=.001):
     if parallel_pool is None:
         parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
 
     if not mesh_was_already_baked:
-        pot_of_x_baked_double_coordinate_mesh = Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p_of_r, q_of_r, w_of_r, r_mesh, dx=dx, disable_pot_pbar=disable_pot_pbar, disable_coord_pbar=disable_coord_pbar)
+        pot_of_x_baked_double_coordinate_mesh = Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p_of_r, q_of_r, w_of_r, r_mesh, liouville_n=liouville_n, dx=dx, disable_pot_pbar=disable_pot_pbar, disable_coord_pbar=disable_coord_pbar)
     else:
         pot_of_x_baked_double_coordinate_mesh = r_mesh
     #r_mesh is now a double_coordinate_mesh baked with potentials
     def mis(lambda_):
+        if lambda_ > 9.15:
+            #breakpoint()
+            pass
         with parallel_pool as pool:
-            return CPM_Method_Shoot_And_Mismatch(pot_of_x_baked_double_coordinate_mesh, init_left_shot_vector, init_right_shot_vector, lambda_, indep_var_mesh_key="x_mesh", indep_var_mesh_key_for_history_override='r_mesh', matching_point_index=None, disable_delta_forward_baking_pbar=True, disable_prop_baking_pbar=True, disable_shooting_pbar=disable_shooting_pbar, disable_local_scaling_factors_baking_pbar=disable_local_scaling_factors_baking_pbar, store_solution=store_solution, parallel_pool=pool)
-    return pot_of_x_baked_double_coordinate_mesh, mis
+            return CPM_Method_Shoot_And_Mismatch(pot_of_x_baked_double_coordinate_mesh, init_left_shot_vector, init_right_shot_vector, lambda_, indep_var_mesh_key="x_mesh", indep_var_mesh_key_for_history_override='r_mesh', matching_point_index=None, disable_delta_forward_baking_pbar=True, disable_prop_baking_pbar=True, disable_shooting_pbar=disable_shooting_pbar, disable_local_scaling_factors_baking_pbar=disable_local_scaling_factors_baking_pbar, store_solution=store_solution, parallel_pool=pool, adhoc_two=adhoc_two)
+    return pot_of_x_baked_double_coordinate_mesh, MonotonizedFunc(mis, start_val=force_monotone_start_val, stepping_from_anchor_dx=stepping_from_anchor_dx, index_to_monotonize=1) if force_monotone else mis
 #works for azimuthal (magnetic quantum numbers), polar (azimuthal quantum numbers), radial. prufer not so much - not at all monotonic sometimes.for radial problem, has dips at eigen values possibly?
 
 
@@ -1237,8 +1495,7 @@ def boundary_conditions_to_shooters(conditions, mode="periodic"): #takes in some
 def generic_plot(x_vals, func, disable_pbar=False, title=None):
     if title is None:
         title = str(datetime.datetime.today())
-    print("Calculating func values to plot...")
-    y_vals = [func(x_val) for x_val in tqdm(x_vals, disable=disable_pbar)]
+    y_vals = [func(x_val) for x_val in tqdm(x_vals, desc='Calculating Plot Values...', disable=disable_pbar)]
 
     min_y, max_y = min(y_vals), max(y_vals)
     y_abs_limit = min([abs(min_y), abs(max_y)])
@@ -1444,16 +1701,15 @@ while True:
 
 #azimuthal equation (magnetic quantum numbers)
 
-def azi():
+def azi(which_init=1):
     p_of_r, q_of_r, w_of_r = lambda x: 1, lambda x: 0, lambda x: 1
     mesh_dr = .001
     newton_tol = .001
     r_mesh = np.arange(0, 2*math.pi, mesh_dr)
-    init_left_shot_vector, init_right_shot_vector = [0,1], [0,1]
+    init_left_shot_vector, init_right_shot_vector = [[0,1], [1,0]][which_init], [[0,1], [1,0]][which_init]
     pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
     baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=.01, parallel_pool=pool)
     generic_plot(np.arange(-.1, 10, .2), lambda e: mis_eigen(e)[1])
-
     #guess = 2#float(input("guess: "))
     #print(Secant_Method(mis_eigen, guess, guess+.01, newton_tol, f_index_to_rootfind=0))
 
@@ -1461,7 +1717,7 @@ def azi():
 
 
 #polar (azimuthal quantum numbers) equation
-def polar():
+def polar(which_init=1):
     m=3
     p_of_r, q_of_r, w_of_r = lambda x: math.sin(x), lambda x: m**2/math.sin(x), lambda x: math.sin(x)
 
@@ -1477,28 +1733,25 @@ def polar():
 
     newton_tol=.001
     r_mesh = np.concatenate(np.array([np.arange(boundary_epsilon, mesh_r_mid_left, mesh_dr_left), np.arange(mesh_r_mid_left, mesh_r_mid_right, mesh_dr_mid), np.arange(mesh_r_mid_right, math.pi-boundary_epsilon, mesh_dr_end)], dtype=object))
-    init_left_shot_vector_0, init_right_shot_vector_0 = [0,1], [0,1]
-    baked_mesh_0, mis_eigen_0 = CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector_0, init_right_shot_vector_0, dx=.01)
+    init_left_shot_vector_0, init_right_shot_vector_0 = [[0,1], [1,0]][which_init], [[0,1], [1,0]][which_init]
+    baked_mesh_0, mis_eigen_0 = CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector_0, init_right_shot_vector_0, dx=.01, adhoc_two=False)
+    #breakpoint()
     #while True:
         #guess = float(input("guess: "))
         #print(Secant_Method(mis_eigen, guess, guess+.01, newton_tol, f_index_to_rootfind=0))
-
-    generic_plot(np.arange(-1,27,.1),lambda l: mis_eigen_0(l)[1])
-
+    #generic_plot(np.arange(0, 30.1, .1), lambda l: mis_eigen_0(l)[1])
+    generic_plot(np.arange(9.16087, 9.1742, .0000005), lambda l: mis_eigen_0(l)[1])
+    
 #radial
-def radial(boundary_epsilon=.0001, mid_r_start=1, mid_r_end=999, boundary_inf_approx=1000, mesh_dr_start=.0001, mesh_dr_mid=.01, mesh_dr_end=.0001, Num_D_Liouville_dx=.0001):
-    electron_mass, proton_mass = constants.electron_mass, constants.proton_mass
-    reduced_mass = electron_mass*proton_mass/(electron_mass+proton_mass)
-    electron_charge = constants.elementary_charge
-    vaccuum_permittivity = constants.epsilon_0
-    hbar = constants.hbar
+def radial(which_init=0, boundary_epsilon=.01, mid_r_start=1, mid_r_end=49, boundary_inf_approx=50, mesh_dr_start=.01, mesh_dr_mid=.01, mesh_dr_end=.01, Num_D_sigma_dx=.0001, liouville_n=2):
+    #electron_mass, proton_mass = constants.electron_mass, constants.proton_mass
+    #reduced_mass = electron_mass*proton_mass/(electron_mass+proton_mass)
+    #electron_charge = constants.elementary_charge
+    #vaccuum_permittivity = constants.epsilon_0
+    #hbar = constants.hbar
 
     l = 1
-    #boundary_epsilon = .0001
-    #mid_r_start = 1
-    #mid_r_end = 50
-    #boundary_inf_approx = 1000
-
+ 
     #p_of_r,q_of_r,w_of_r = lambda x: x**2, lambda x: l*(l+1) - ( ((2*reduced_mass*(x**2))/(hbar**2)) * ((electron_charge**2)/(4*math.pi*vaccuum_permittivity*x))  ), lambda x: ((2*reduced_mass*(x**2))/(hbar**2))
     #p_of_r,q_of_r,w_of_r = lambda x: 1, lambda x: l*(l+1)/(x**2) - (1/x), lambda x: 1
     p_of_r,q_of_r,w_of_r = lambda x: x**2, lambda x: l*(l+1) - (2*x), lambda x: 2*(x**2)
@@ -1512,9 +1765,8 @@ def radial(boundary_epsilon=.0001, mid_r_start=1, mid_r_end=999, boundary_inf_ap
     r_mesh_mid = np.arange(mid_r_start, mid_r_end, mesh_dr_mid)
     r_mesh_end = np.arange(mid_r_end, boundary_inf_approx, mesh_dr_end)
     r_mesh = np.concatenate([r_mesh_start, r_mesh_mid, r_mesh_end])
-    init_left_shot_vector, init_right_shot_vector = [0,1], [0,1]
+    init_left_shot_vector, init_right_shot_vector = [[0,1], [1,0]][which_init], [[0,1], [1,0]][which_init]
 
-    #Num_D_Liouville_dx = .0001
 
     #!!!very high mismatch value...for the correct eigenvalue.
     pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
@@ -1522,21 +1774,27 @@ def radial(boundary_epsilon=.0001, mid_r_start=1, mid_r_end=999, boundary_inf_ap
     disable_shooting_pbar = False
     disable_coord_pbar = False
     disable_pot_pbar = False
-    baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r,q_of_r,w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=Num_D_Liouville_dx, disable_shooting_pbar=disable_shooting_pbar, disable_coord_pbar=disable_coord_pbar, disable_pot_pbar=disable_pot_pbar, store_solution=True, parallel_pool=pool)
+    store_solution = False
+    force_monotone = True
+    baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r,q_of_r,w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, liouville_n=liouville_n, dx=Num_D_sigma_dx, disable_shooting_pbar=disable_shooting_pbar, disable_coord_pbar=disable_coord_pbar, disable_pot_pbar=disable_pot_pbar, store_solution=store_solution, parallel_pool=pool, force_monotone=force_monotone, force_monotone_start_val=-.1261, stepping_from_anchor_dx=.001, adhoc_two=False)
+    #breakpoint()
     #print("plotting")
-    #generic_plot(np.arange(-.0615,-0.0605,.0001), lambda e: mis_eigen(e)[1])
+    #generic_plot(np.arange(-.1251, -.124, .00025), lambda e: mis_eigen(e)[1])
+    generic_plot(np.arange(-.1261, -.03, .001), lambda e: mis_eigen(e)[1])
+    #generic_plot(np.arange(-.126, -.01, .001), lambda e: mis_eigen(e)[1]) 
+    #breakpoint()
     #eig_out = mis_eigen(-.0625)
     #plot_data = eig_out[2]
     #plot_data = np.array(plot_data)
-    return baked_mesh,  mis_eigen #mis_eigen(-.0625)[1]
-
+    #mis_eigen(-.0625)[1]
+#radial()
 
     #stable_roots = lambda index: find_stable_roots_in_mis_and_cpm_prufer(mis_eigen, index)
     #print([stable_roots(i) for i in range(1,2)])
 
 #boundary_epsilon=.0001,
 #boundary_inf_approx=1000,
-#mesh_dr_start=.00001, mesh_dr_mid=.001, mesh_dr_end=.01, Num_D_Liouville_dx=.0001
+#mesh_dr_start=.00001, mesh_dr_mid=.001, mesh_dr_end=.01, Num_D_sigma_dx=.0001
 
 '''
 import time
@@ -1562,7 +1820,7 @@ def parameter_test():
             f.write(str(these_args)+'; ')
             try:
                 start_time = time.time()
-                err=1-radial(boundary_epsilon=these_args[0], boundary_inf_approx=these_args[1], mesh_dr_start=these_args[2], mesh_dr_mid=these_args[3], mesh_dr_end=these_args[4], Num_D_Liouville_dx=these_args[5])
+                err=1-radial(boundary_epsilon=these_args[0], boundary_inf_approx=these_args[1], mesh_dr_start=these_args[2], mesh_dr_mid=these_args[3], mesh_dr_end=these_args[4], Num_D_sigma_dx=these_args[5])
                 end_time = time.time()
                 dt = end_time - start_time
                 f.write(str(err))

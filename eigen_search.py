@@ -9,6 +9,7 @@ Created on Sun Jan 15 09:34:19 2023
 from tqdm import tqdm
 
 import math
+import random
 import numpy as np
 
 import itertools
@@ -34,7 +35,7 @@ import joblib
 VERBOSITY = 0
 
 
-def Solve_For_Eigens(problem_funcs, x_start=None, x_end=None, baked_x_mesh_override=None, mesh_dx=.05, which_basis_init_vector=0, stop_at_candidate_roots_num_thresh=5, potentially_ad_hoc_start_eigen_index=0, get_eigens_up_to_n=3, dx=.05, bisect_tol=.1, parallel_pool=None):
+def Solve_For_Eigens(problem_funcs, x_start=None, x_end=None, baked_x_mesh_override=None, mesh_dx=.05, which_basis_init_vector=0, stop_at_candidate_roots_num_thresh=5, potentially_ad_hoc_start_eigen_index=0, get_eigens_up_to_n=3, liouville_n=10, dx=.05, bisect_tol=.1, parallel_pool=None, force_monotone=False, force_monotone_start_val=-.1, stepping_from_anchor_dx=.001):
     basis_init_vectors = [0,1], [1,0]
 
     if parallel_pool is None:
@@ -42,13 +43,13 @@ def Solve_For_Eigens(problem_funcs, x_start=None, x_end=None, baked_x_mesh_overr
     if baked_x_mesh_override is None:
         if (not (x_start is None)) and (not (x_end is None)):
             baked_x_mesh = np.arange(x_start, x_end, mesh_dx)
-            baked_x_mesh = sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*problem_funcs, baked_x_mesh, dx=dx)
+            baked_x_mesh = sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*problem_funcs, baked_x_mesh, liouville_n=liouville_n, dx=dx)
         else:
             raise TypeError("Solve_For_Eigens needs either a x_start and x_end, or a baked_x_mesh_override!")
     else:
         baked_x_mesh = baked_x_mesh_override
 
-    baked_mesh, mis_eigen = sl.CPM_Method_Liouville_Mismatch(*problem_funcs, baked_x_mesh, basis_init_vectors[which_basis_init_vector], basis_init_vectors[which_basis_init_vector], mesh_was_already_baked=True, dx=dx, parallel_pool=parallel_pool)
+    baked_mesh, mis_eigen = sl.CPM_Method_Liouville_Mismatch(*problem_funcs, baked_x_mesh, basis_init_vectors[which_basis_init_vector], basis_init_vectors[which_basis_init_vector], mesh_was_already_baked=True, liouville_n=liouville_n, dx=dx, parallel_pool=parallel_pool, force_monotone=force_monotone, force_monotone_start_val=force_monotone_start_val, stepping_from_anchor_dx=stepping_from_anchor_dx)
     #breakpoint()
     if stop_at_candidate_roots_num_thresh==1: #only doing one root means we just use the non-stability-checking root finding method
         get_tailored_prufer = lambda index: lambda lambda_: mis_eigen(lambda_)[1] - index
@@ -93,21 +94,6 @@ def unravel_eigens(eigens_for_each_coord, parallel_pool=None): #this function lo
 
         pbar.update(1)
         states = new_states
-
-def find_surrounding_indice_in_mono_arr(val, arr, use_ends_of_arr_if_not_in_arr=True):
-    if val <= arr[0]:
-        if use_ends_of_arr_if_not_in_arr:
-            return [0, 0]
-        else:
-            raise ValueError("Val not in arr!")
-    elif arr[-1] < val:
-        if use_ends_of_arr_if_not_in_arr:
-            return [len(arr)-1, len(arr)-1]
-        else:
-            raise ValueError("Val not in arr!")
-    else:
-        i = np.searchsorted(arr, val, side="left")
-        return (i-1, i)
     
 '''
 def find_surrounding_indice_in_mono_arr(val, arr, use_ends_of_arr_if_not_in_arr=True):
@@ -129,8 +115,6 @@ def find_surrounding_indice_in_mono_arr(val, arr, use_ends_of_arr_if_not_in_arr=
             raise ValueError("Val not in arr!")
 '''
 
-def find_indices_given_coords(coords, arrs):
-    return [find_surrounding_indice_in_mono_arr(coords[i], arrs[i]) for i in range(len(coords))]
 
 def lerp(time, point_0, point_1):
     try:
@@ -160,7 +144,7 @@ def interp_in_coord_out_arr(coord_out_arr):
         coord_out_arr = np.array(coord_out_arr)
     
     def out_interp(coord):
-        surrounding_indices_func = find_indices_given_coords([coord], [coord_out_arr[:,0]])[0]
+        surrounding_indices_func = sl.find_indices_given_coords([coord], [coord_out_arr[:,0]])[0]
         left_coord, left_val = coord_out_arr[surrounding_indices_func[0]]
         right_coord, right_val = coord_out_arr[surrounding_indices_func[1]]
         if right_coord - left_coord == 0:
@@ -189,7 +173,7 @@ def Make_Make_Total_Eigen_Func_Given_Eigens_Given_Component_Eigen_Funcs(eigen_fu
 
             all_surrounding_indices = []
             for i in range(len(eigens)):
-                this_surrounding_indice = find_surrounding_indice_in_mono_arr(position_vect[i], all_coords[i])
+                this_surrounding_indice = sl.find_surrounding_indice_in_mono_arr(position_vect[i], all_coords[i])
                 all_surrounding_indices.append(this_surrounding_indice)
 
             surrounding_indices_vects = itertools.product(*all_surrounding_indices)
@@ -338,17 +322,135 @@ def scalar_3D_plot(coord_ranges, scalar_func, color_func=lambda normed_val: np.a
     out_list.extend([coord_range_vects_with_valid_domain, function_outs, coord_and_func_outs])
     return out_list
 
+def integrate_3D(func, window=[[0,1], [0, 2*math.pi], [0, math.pi]], func_coord_system='spherical', window_coord_system='spherical', monte_carlo_n=10000):
+    if func_coord_system == 'spherical':
+        integrand = lambda r, phi, theta: func(r, phi, theta) * (r**2) * math.sin(theta) 
+    elif func_coord_system == 'cartesian':
+        integrand = lambda x, y, z: func(x,y,z)
+        
+    if not (monte_carlo_n is False):
+        if window_coord_system == func_coord_system:
+            if window_coord_system == 'spherical':
+                volume = (window[0][1] - window[0][0]) * (window[1][1] - window[1][0]) * (window[2][1] - window[2][0])
+            elif window_coord_system == 'cartesian':
+                volume = (window[0][1] - window[0][0]) * (window[1][1] - window[1][0]) * (window[2][1] - window[2][0])
+         
+        running_total = 0
+        for i in range(monte_carlo_n):
+            random_coords = np.random.default_rng().uniform(low=window[0][0], high=window[0][1]), np.random.default_rng().uniform(low=window[1][0], high=window[1][1]), np.random.default_rng().uniform(low=window[2][0], high=window[2][1])
+            running_total += integrand(*random_coords)
+        
+        return volume * running_total/(monte_carlo_n)
+    
+def normalize(func, window=[[0,1], [0, 2*math.pi], [0, math.pi]], func_coord_system='spherical', window_coord_system='spherical', monte_carlo_n=10000):
+    integral_value = integrate_3D(func, window=window, func_coord_system=func_coord_system, window_coord_system=window_coord_system, monte_carlo_n=monte_carlo_n)
+    normalized_func = lambda coord1, coord2, coord3: func(coord1, coord2, coord3)/integral_value if (window[0][0]<=coord1<=window[0][1] and window[1][0]<=coord2<=window[1][1] and window[2][0]<=coord3<=window[2][1]) else 0
+    return normalized_func
 
+def metropolis_hastings(un_normed_probability_density, starting_window=[[-1,1], [-1,1], [-1,1]], dimension=3, starting_diagonal_covariance=np.array([1,1,1], dtype=np.float64), run_time=1000, sample_size=10, pbar=True):
+    starting_diagonal_covariance = starting_diagonal_covariance.astype(np.float64)
+    starting_window = np.array(starting_window)
+    
+    starting_window_lows, starting_window_highs = starting_window[:,0], starting_window[:,1]
+    starting_state = np.random.default_rng().uniform(low=starting_window_lows, high=starting_window_highs)
+    
+    def make_proposal_sampler(diagonal_covariance):
+        proposal_sampler = lambda dimension=dimension, diagonal_covariance=diagonal_covariance: np.random.default_rng().multivariate_normal(np.zeros((dimension,)), np.diag(diagonal_covariance))
+        return proposal_sampler
+    
+    state_list = []
+    this_state = starting_state
+    max_maximum_diagonal_covariance = starting_diagonal_covariance.max()*2
+    min_minimum_diagonal_covariance = starting_diagonal_covariance.min()*.5
+    current_diagonal_covariance = starting_diagonal_covariance
+    total_iters = 0
+    accept_list_size = 100 #!!!
+    accept_list = []
+    acceptance_rate = None
+    if pbar==True:
+        maybe_pbar_iteration_list = tqdm(range(run_time))
+    else:
+        maybe_pbar_iteration_list = range(run_time)
+    for i in maybe_pbar_iteration_list:
+        total_iters += 1
+        state_list.append(this_state)
+        
+        if total_iters > 100 and True: #!!!
+            if acceptance_rate < .27:
+                if current_diagonal_covariance.min() > min_minimum_diagonal_covariance:
+                    current_diagonal_covariance *= .9
+            elif acceptance_rate > .33:
+                if current_diagonal_covariance.max() < max_maximum_diagonal_covariance:
+                    current_diagonal_covariance *= 1.1
+        
+        current_proposal_sampler = make_proposal_sampler(current_diagonal_covariance)
+        
+        proposal = current_proposal_sampler()
+        this_weight = un_normed_probability_density(*this_state)
+        proposal_weight = un_normed_probability_density(*proposal)
+        acceptance_probability = proposal_weight/this_weight
+        if acceptance_probability >= 1:
+            this_state = proposal
+            if len(accept_list) >= accept_list_size:
+                accept_list.pop(0)
+            accept_list.append(True)
+            acceptance_rate = sum(accept_list)/len(accept_list)
+        else:
+            random_roll = np.random.default_rng().uniform(low=0,high=1)
+            if random_roll <= acceptance_probability:
+                this_state = proposal
+                if len(accept_list) >= accept_list_size:
+                    accept_list.pop(0)
+                accept_list.append(True)
+                acceptance_rate = sum(accept_list)/len(accept_list)
+            else:
+                if len(accept_list) >= accept_list_size:
+                    accept_list.pop(0)
+                accept_list.append(False)
+                acceptance_rate = sum(accept_list)/len(accept_list)
+                continue
+    
+    if sample_size is None:
+        return state_list
+    else:
+        return np.random.default_rng().choice(state_list,size=sample_size), state_list
+        
+        
+def plot3D_point_list(points, fig=None, ax=None, alpha=.5, plotting_window=[ [-5, 5], [-5, 5], [-5, 5] ]):
+    if ax == None:
+        fig = plt.figure()
+        ax = fig.add_subplot(projection='3d')
+    
+    ax.scatter(points[:,0], points[:,1], points[:,2], alpha=alpha, s=.5)
+    ax.axes.set_xlim3d(*plotting_window[0])
+    ax.axes.set_ylim3d(*plotting_window[1]) 
+    ax.axes.set_zlim3d(*plotting_window[2]) 
+    return fig, ax
+    
+def point_cloud_plot(un_normed_probability_density, metropolis_starting_window=[[-1,1], [-1, 1], [-1, 1]], func_coord_system='spherical', window_coord_system='cartesian', num_points=100, alpha=.01, fig=None, ax=None, filename=None):
+    metropolis_starting_window = np.array(metropolis_starting_window)
+    if window_coord_system == 'cartesian':
+        cartesian_un_normed_prob_density = lambda x,y,z: un_normed_probability_density(*convert_coord([x,y,z], from_system='cartesian', out_system=func_coord_system))
+        
+        points, total_state_list = metropolis_hastings(cartesian_un_normed_prob_density, starting_window=metropolis_starting_window, run_time=num_points*100, sample_size=num_points)
+        
+        fig, ax = plot3D_point_list(points, fig=fig, ax=ax, alpha=alpha)
+        if filename is not None:
+            fig.savefig(f"Images/Point_Clouds/{filename}")
+        return fig,ax
+            
+    
 def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,0]): #!!!generalize!
     #azimuthal (magnetic quantum numbers) equation
     azi_problem = [lambda x: 1, lambda x: 0, lambda x: 1]
     azi_dx = .001
+    azi_liouville_n = 10
     bisect_tol = .001
     azi_mesh = np.arange(0, 2*math.pi, azi_dx)
     baked_azi_mesh = sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*azi_problem, azi_mesh, dx=azi_dx)
     which_basis_init_vector_0 = which_basis_init_wronsks[0]
     #breakpoint()
-    azi_eigens = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(azi_problem, baked_x_mesh_override=baked_azi_mesh, which_basis_init_vector=which_basis_init_vector_0, stop_at_candidate_roots_num_thresh=1, potentially_ad_hoc_start_eigen_index=1, dx=azi_dx, bisect_tol=bisect_tol, parallel_pool=parallel_pool)
+    azi_eigens = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(azi_problem, baked_x_mesh_override=baked_azi_mesh, which_basis_init_vector=which_basis_init_vector_0, stop_at_candidate_roots_num_thresh=1, potentially_ad_hoc_start_eigen_index=1, liouville_n=azi_liouville_n, dx=azi_dx, bisect_tol=bisect_tol, parallel_pool=parallel_pool, force_monotone=False, force_monotone_start_val=-.1, stepping_from_anchor_dx=.001)
     azi_eigen_func_given_eigen = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(azi_problem, azi_mesh[0], azi_mesh[-1], which_basis_init_vector=which_basis_init_vector_0, dx=azi_dx*(10**-2))
 
 
@@ -362,11 +464,12 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     mesh_theta_mid_right = .8
     mesh_dtheta_end = .001
     theta_dx = .001
+    theta_liouville_n = 10
     bisect_tol = .001
     theta_mesh = np.concatenate(np.array([np.arange(boundary_epsilon_theta, mesh_theta_mid_left, mesh_dtheta_left), np.arange(mesh_theta_mid_left, mesh_theta_mid_right, mesh_dtheta_mid), np.arange(mesh_theta_mid_right, math.pi-boundary_epsilon_theta, mesh_dtheta_end)], dtype=object))
-    baked_theta_mesh_given_azi_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*theta_problem_given_azi_eig(*prev_coord_eigens), theta_mesh, dx=theta_dx)
+    baked_theta_mesh_given_azi_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*theta_problem_given_azi_eig(*prev_coord_eigens), theta_mesh, liouville_n=theta_liouville_n, dx=theta_dx)
     which_basis_init_vector_1 = which_basis_init_wronsks[1]
-    theta_eigens_given_azi_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(theta_problem_given_azi_eig(*prev_coord_eigens), baked_x_mesh_override=baked_theta_mesh_given_azi_eig(*prev_coord_eigens), mesh_dx=theta_dx, which_basis_init_vector=which_basis_init_vector_1, stop_at_candidate_roots_num_thresh=1, potentially_ad_hoc_start_eigen_index=1, dx=theta_dx, bisect_tol=bisect_tol, get_eigens_up_to_n=3, parallel_pool=parallel_pool)
+    theta_eigens_given_azi_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(theta_problem_given_azi_eig(*prev_coord_eigens), baked_x_mesh_override=baked_theta_mesh_given_azi_eig(*prev_coord_eigens), mesh_dx=theta_dx, which_basis_init_vector=which_basis_init_vector_1, stop_at_candidate_roots_num_thresh=1, potentially_ad_hoc_start_eigen_index=1, liouville_n=theta_liouville_n, dx=theta_dx, bisect_tol=bisect_tol, get_eigens_up_to_n=3, parallel_pool=parallel_pool, force_monotone=False, force_monotone_start_val=-.1, stepping_from_anchor_dx=.001)
     theta_eigen_func_given_azi_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(theta_problem_given_azi_eig(*prev_coord_eigens), theta_mesh[0], theta_mesh[-1], dx=theta_dx*(10**-2), which_basis_init_vector=which_basis_init_vector_1)
 
 
@@ -391,14 +494,15 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
     r_mesh_mid = np.arange(mid_r_start, mid_r_end, mesh_dr_mid)
     r_mesh_end = np.arange(mid_r_end, boundary_inf_approx, mesh_dr_end)
     r_mesh = np.concatenate([r_mesh_start, r_mesh_mid, r_mesh_end])
-    Num_D_Liouville_dx = .0001
+    Num_D_sigma_dx = .0001
+    r_liouville_n = 10
     r_dx = .0001
-    baked_radial_mesh_given_theta_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*r_problem_given_theta_eig(*prev_coord_eigens), r_mesh, dx=r_dx)
+    baked_radial_mesh_given_theta_eig = lambda *prev_coord_eigens: sl.Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(*r_problem_given_theta_eig(*prev_coord_eigens), r_mesh, liouville_n=r_liouville_n, dx=r_dx)
     which_basis_init_vector_2 = which_basis_init_wronsks[2]
     bisect_tol = .0001
     
 
-    radial_eigens_given_theta_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(r_problem_given_theta_eig(*prev_coord_eigens), baked_x_mesh_override=baked_radial_mesh_given_theta_eig(*prev_coord_eigens), dx=Num_D_Liouville_dx, which_basis_init_vector=which_basis_init_vector_2, bisect_tol=bisect_tol, parallel_pool=parallel_pool)
+    radial_eigens_given_theta_eig = lambda *prev_coord_eigens, parallel_pool=None: Solve_For_Eigens(r_problem_given_theta_eig(*prev_coord_eigens), baked_x_mesh_override=baked_radial_mesh_given_theta_eig(*prev_coord_eigens), dx=Num_D_sigma_dx, which_basis_init_vector=which_basis_init_vector_2, bisect_tol=bisect_tol, parallel_pool=parallel_pool, force_monotone=False, force_monotone_start_val=-.1, stepping_from_anchor_dx=.001)
     #breakpoint()
     #radial_eigen_func_given_theta_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(r_problem_given_theta_eig(*prev_coord_eigens), r_mesh[0], r_mesh[-1], dx=mesh_dr_start, which_basis_init_vector=which_basis_init_vector_2, asymptotic_clamping=True)
     radial_eigen_func_given_theta_eig = lambda *prev_coord_eigens: Make_Eigen_Func_Given_Eigen(r_problem_given_theta_eig(*prev_coord_eigens), r_mesh[0], r_mesh[-1], dx=mesh_dr_start, which_basis_init_vector=which_basis_init_vector_2, asymptotic_clamping=True)
@@ -420,12 +524,11 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
                 radial_func = interp_in_coord_out_arr(np.array(radial_eigen_func_given_theta_eig(m**2,l*(l+1))(energy)))
                 hopefully_hydrogen_wave_function = lambda r, phi, theta: hopefully_real_sph_harm(phi, theta) * radial_func(r)
                 #breakpoint()
-                with open(f"data/hopefully_hydrogen_wave_function_data_init={which_basis_init_wronsks}_nlm={n}_{l}_{m}.txt", 'w') as f:
-                    for r in tqdm(np.arange(0,1,.1)):
-                        for phi in tqdm(np.arange(0,2*math.pi,.01)):
-                            for theta in tqdm(np.arange(0,math.pi,.02)):
-                                f.write(f"{r},{phi},{theta},{hopefully_hydrogen_wave_function(r,phi,theta)}\n")
- 
+                window = [[-40,40],[-40,40],[-40,40]]
+                un_normed_probability_density = lambda r, phi, theta: hopefully_hydrogen_wave_function(r, phi, theta)**2
+                
+                point_cloud_plot(un_normed_probability_density, metropolis_starting_window=window, func_coord_system='spherical', window_coord_system='cartesian', num_points=10000, alpha=.0001, filename=f'{n}_{l}_{m}')
+                print('check result!')
                 fig, ax = plt.subplots()
                 ax.plot(np.arange(0,40,.0001), [(radial_func(r)**2) * (r**2) for r in np.arange(0,40,.0001)])
                 fig.savefig(f"Images/Radial_Probability_Densities/Prob_{n}_{l}_{m}")
