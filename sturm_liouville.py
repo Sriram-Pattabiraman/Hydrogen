@@ -29,9 +29,10 @@ import scipy as sp
 from scipy import constants
 
 import itertools
+from utility_funcs import interleave
 
 import joblib
-VERBOSITY = 1
+VERBOSITY = 0
 
 
 #references for future me:
@@ -519,8 +520,10 @@ def backward_mat_for_one_baking_iter(this_pots_minus_lambda, this_delta_backward
     return Make_Prop_Mat_Backward(this_pots_minus_lambda, this_delta_backward, xi_out_right, eta_out_right)
 
 def Bake_Prop_Mats(baked_mesh, lambda_, indep_var_mesh_key="mesh", matching_point_index=None, disable_pbar=False, parallel_pool=None): #assumes mesh has delta_forward_mesh baked in
+    #!!!This is the bottleneck during a rootfind session
+
     if parallel_pool is None:
-        parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
+        parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096, prefer='threads')
     if matching_point_index is None:
         matching_point_index = len(baked_mesh[indep_var_mesh_key])//2
 
@@ -769,7 +772,7 @@ def CPM_Method_Shoot_And_Mismatch(baked_mesh, left_shot_vector, right_shot_vecto
     if indep_var_mesh_key_for_history_override is None:
         indep_var_mesh_key_for_history_override = indep_var_mesh_key
     if parallel_pool is None:
-        parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
+        parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096, prefer='threads')
     if "delta_forward_mesh" not in baked_mesh.keys():
         Bake_Delta_Forward(baked_mesh, indep_var_mesh_key=indep_var_mesh_key, disable_pbar=disable_delta_forward_baking_pbar)
 
@@ -909,7 +912,7 @@ def Make_Liouville_Q_Integrand(p_of_r, w_of_r):#this is the integrand used to do
     #!!!store this in a baked mesh, do the custom liouville integration baked into the mesh, as these are all energy independent values.
     return lambda r: (w_of_r(r)/p_of_r(r))**.5
 
-def Dumb_Double_Mesh_Make(Q_Integrand, r_mesh, liouville_n=10, disable_coord_pbar=False):
+def Dumb_Double_Mesh_Make(Q_Integrand, r_mesh, liouville_n=2, disable_coord_pbar=False):
     double_coordinate_mesh = {"r_mesh": r_mesh}
     x_vals = [0.0]
     for left_indice in tqdm(range(len(double_coordinate_mesh["r_mesh"])-1), desc="Making double_coordinate_mesh...", disable=disable_coord_pbar):
@@ -988,7 +991,8 @@ def Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=None, backup_x_of_r
             return q_of_r(r)/w_of_r(r) + backup_sigma(r) * NumD(NumD(lambda x: 1/backup_sigma(x), dx, cmp_step=False), dx, cmp_step=False)(baked_mesh[x_var_mesh_name][indice])
     return pot_of_x
 
-def Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p_of_r, q_of_r, w_of_r, r_mesh, liouville_n=10, dx=.001, disable_pot_pbar=False, disable_coord_pbar=False):
+EXPERIMENTAL_NO_BACKUP_SIGMA = True
+def Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p_of_r, q_of_r, w_of_r, r_mesh, liouville_n=2, dx=.001, disable_pot_pbar=False, disable_coord_pbar=False):
     Q_Integrand = Make_Liouville_Q_Integrand(p_of_r, w_of_r)
     double_coordinate_mesh = Dumb_Double_Mesh_Make(Q_Integrand, r_mesh, liouville_n=liouville_n, disable_coord_pbar=disable_coord_pbar)
     sigma_of_r = Make_Liouville_Sigma_Given_R(p_of_r, w_of_r)
@@ -998,33 +1002,21 @@ def Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p
     backup_sigma=sigma_of_r
     backup_x_of_r=x_of_r
     backup_r_of_x=r_of_x
-    pot = Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=sigma_of_r, backup_x_of_r=x_of_r, backup_r_of_x=r_of_x, dx=dx)
-    #pot = Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=None, backup_x_of_r=x_of_r, backup_r_of_x=r_of_x, dx=dx)
+    
+    if EXPERIMENTAL_NO_BACKUP_SIGMA:
+        pot = Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=None, backup_x_of_r=x_of_r, backup_r_of_x=r_of_x, dx=dx)
+    else:
+        pot = Make_Potential_At_An_Indice(q_of_r, w_of_r, backup_sigma=sigma_of_r, backup_x_of_r=x_of_r, backup_r_of_x=r_of_x, dx=dx)
+        
     bake_potentials_into_mesh(pot, double_coordinate_mesh, indep_var_mesh_key="x_mesh", disable_pbar=disable_pot_pbar)
     return double_coordinate_mesh
 
-def find_surrounding_indice_in_mono_arr(val, arr, use_ends_of_arr_if_not_in_arr=True):
-    if val <= arr[0]:
-        if use_ends_of_arr_if_not_in_arr:
-            return [0, 0]
-        else:
-            raise ValueError("Val not in arr!")
-    elif arr[-1] < val:
-        if use_ends_of_arr_if_not_in_arr:
-            return [len(arr)-1, len(arr)-1]
-        else:
-            raise ValueError("Val not in arr!")
-    else:
-        i = np.searchsorted(arr, val, side="left")
-        return (i-1, i)
-    
-def find_indices_given_coords(coords, arrs):
-    return [find_surrounding_indice_in_mono_arr(coords[i], arrs[i]) for i in range(len(coords))]
+
 
 class MonotonizedFunc: #this is the way to make a function with memory. yes, the break from the functional-style of the rest of this code irks me too.    
     #!!!assumes monotone up - generalize this
     #!!!assumes known lists are sorted
-    def __init__(self, func, index_to_monotonize=None, start_val=-.1, known_indep_var_coords=np.array([], dtype=np.float64), known_monotonized_and_non_monotonized_vals=np.empty((0,2), dtype=np.float64), other_indices_func_outs=np.empty((0,0)), stepping_from_anchor_dx=.001, sustain_thresh=5, is_a_jump_thresh=.45, disable_scaffold_climbing_pbar=False):  
+    def __init__(self, func, index_to_monotonize=None, start_val=-.1, known_indep_var_coords=np.array([], dtype=np.float64), known_monotonized_and_non_monotonized_vals=np.empty((0,2), dtype=np.float64), other_indices_func_outs=np.empty((0,0)), stepping_from_anchor_dx=.001, sustain_thresh=5, is_a_jump_thresh=.45, disable_scaffold_climbing_pbar=True, print_fake_jumps=False):  
         #breakpoint()
         insertion_index = known_indep_var_coords.searchsorted(start_val)
         if len(known_indep_var_coords)==0 or (known_indep_var_coords[insertion_index] != start_val and (insertion_index==0 or known_indep_var_coords[insertion_index-1])):
@@ -1053,6 +1045,7 @@ class MonotonizedFunc: #this is the way to make a function with memory. yes, the
         self.sustain_thresh = sustain_thresh
         self.is_a_jump_thresh = is_a_jump_thresh
         self.disable_scaffold_climbing_pbar = disable_scaffold_climbing_pbar
+        self.print_fake_jumps = print_fake_jumps
         
     def __call__(self, indep_var):
         #breakpoint()
@@ -1142,7 +1135,8 @@ class MonotonizedFunc: #this is the way to make a function with memory. yes, the
                             if passed:
                                 this_monotonized_val = prev_monotonized_val + abs(func_diff)
                             else:
-                                print(f"Fake jump at {coord}")
+                                if self.print_fake_jumps:
+                                    print(f"Fake jump at {coord}")
                                 this_monotonized_val = prev_monotonized_val
                     else:
                         #breakpoint()
@@ -1170,7 +1164,8 @@ class MonotonizedFunc: #this is the way to make a function with memory. yes, the
                         if passed:
                             this_monotonized_val = prev_monotonized_val + abs(func_diff)
                         else:
-                            print(f"Fake jump at {coord}")
+                            if self.print_fake_jumps:
+                                print(f"Fake jump at {coord}")
                             this_monotonized_val = prev_monotonized_val
                 elif which_is_anchor == 'upper': #!!!generalize for monotone down
                     if func_diff <= 0:
@@ -1201,7 +1196,8 @@ class MonotonizedFunc: #this is the way to make a function with memory. yes, the
                             if passed:
                                 this_monotonized_val = prev_monotonized_val - abs(func_diff)
                             else:
-                                print(f"Fake jump at {coord}")
+                                if self.print_fake_jumps:
+                                    print(f"Fake jump at {coord}")
                                 this_monotonized_val = prev_monotonized_val
                     else:
                         #breakpoint()
@@ -1229,7 +1225,8 @@ class MonotonizedFunc: #this is the way to make a function with memory. yes, the
                         if passed:
                             this_monotonized_val = prev_monotonized_val - abs(func_diff)
                         else:
-                            print(f"Fake jump at {coord}")
+                            if self.print_fake_jumps:
+                                print(f"Fake jump at {coord}")
                             this_monotonized_val = prev_monotonized_val
                 self.known_indep_var_coords = np.insert(self.known_indep_var_coords, this_insertion_index, coord)
                 self.known_monotonized_and_non_monotonized_vals = np.insert(self.known_monotonized_and_non_monotonized_vals, this_insertion_index, [this_monotonized_val, this_func_val], axis=0)
@@ -1252,9 +1249,9 @@ class MonotonizedFunc: #this is the way to make a function with memory. yes, the
                 return all_outs
 
 
-def CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, mesh_was_already_baked=False, liouville_n=10, dx=.001, disable_shooting_pbar=True, disable_pot_pbar=False, disable_coord_pbar=False, disable_local_scaling_factors_baking_pbar=True, store_solution=False, parallel_pool=None, adhoc_two=False, force_monotone=False, force_monotone_start_val=-.1, stepping_from_anchor_dx=.001):
+def CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, mesh_was_already_baked=False, liouville_n=2, dx=.001, disable_shooting_pbar=True, disable_pot_pbar=False, disable_coord_pbar=False, disable_local_scaling_factors_baking_pbar=True, store_solution=False, parallel_pool=None, adhoc_two=False, force_monotone=False, force_monotone_start_val=-.126, stepping_from_anchor_dx=.001):
     if parallel_pool is None:
-        parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
+        parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096, prefer='threads')
 
     if not mesh_was_already_baked:
         pot_of_x_baked_double_coordinate_mesh = Make_And_Bake_Potential_Of_X_Double_Coordinate_Mesh_Given_Original_Problem(p_of_r, q_of_r, w_of_r, r_mesh, liouville_n=liouville_n, dx=dx, disable_pot_pbar=disable_pot_pbar, disable_coord_pbar=disable_coord_pbar)
@@ -1262,9 +1259,6 @@ def CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot
         pot_of_x_baked_double_coordinate_mesh = r_mesh
     #r_mesh is now a double_coordinate_mesh baked with potentials
     def mis(lambda_):
-        if lambda_ > 9.15:
-            #breakpoint()
-            pass
         with parallel_pool as pool:
             return CPM_Method_Shoot_And_Mismatch(pot_of_x_baked_double_coordinate_mesh, init_left_shot_vector, init_right_shot_vector, lambda_, indep_var_mesh_key="x_mesh", indep_var_mesh_key_for_history_override='r_mesh', matching_point_index=None, disable_delta_forward_baking_pbar=True, disable_prop_baking_pbar=True, disable_shooting_pbar=disable_shooting_pbar, disable_local_scaling_factors_baking_pbar=disable_local_scaling_factors_baking_pbar, store_solution=store_solution, parallel_pool=pool, adhoc_two=adhoc_two)
     return pot_of_x_baked_double_coordinate_mesh, MonotonizedFunc(mis, start_val=force_monotone_start_val, stepping_from_anchor_dx=stepping_from_anchor_dx, index_to_monotonize=1) if force_monotone else mis
@@ -1290,29 +1284,33 @@ def check_stable_part_of_unstable_monotone(unstable_monotone, x_val_to_test, sus
 
 
 
-def find_candidate_roots(tailored_prufer, displacement_mag_quit_thresh=30, stop_at_candidate_roots_num_thresh=3, stop_at_total_steps_total_thresh=100, stop_at_total_steps_per_root_thresh=10, subsequent_root_agreement_tol=.001, interval_tol=.001, mis_val_tol=.01, start_val=0, start_direction="right", start_step_mag=.001, step_mag_increase_factor=2, sustained_monotone_radius_factor_as_ratio_of_prev_step=.1, uni_directional_sustained_monotone_step_sample_count=2, sustained_monotone_success_sample_thresh=.75, fake_root_restart_movement_factor_as_ratio_of_start_step=1): #mis_and_cpm_prufer_mis is a func taking lambda_ and outputting [mismatch, eigen_index]
+def find_candidate_roots(tailored_prufer, displacement_mag_quit_thresh=30, stop_at_candidate_roots_num_thresh=3, stop_at_total_steps_total_thresh=100, stop_at_total_steps_per_root_thresh=10, subsequent_root_agreement_tol=.001, interval_tol=.001, mis_val_tol=.01, candidate_root_start_val_guess=-.6, start_direction="right", start_step_mag=.001, step_mag_increase_factor=2, sustained_monotone_radius_factor_as_ratio_of_prev_step=.1, uni_directional_sustained_monotone_step_sample_count=2, sustained_monotone_success_sample_thresh=.75, fake_root_restart_movement_factor_as_ratio_of_start_step=1, disable_candidate_roots_pbar=True): #mis_and_cpm_prufer_mis is a func taking lambda_ and outputting [mismatch, eigen_index]
     #breakpoint()
     total_steps_total = 0
     current_interval = [-np.inf, np.inf]
-    current_x = start_val
+    current_x = candidate_root_start_val_guess
     original_step_mag = start_step_mag
     current_step_mag = start_step_mag
     prev_direction = start_direction
     total_steps_for_this_root = 0
     candidate_roots = []
-    pbar = tqdm(desc="Finding Candidate Roots...", total=stop_at_total_steps_total_thresh)
+    starting_displace_mag = original_step_mag
+    displace_mag = 1
+    pbar = tqdm(desc="Finding Candidate Roots...", total=stop_at_total_steps_total_thresh, disable=disable_candidate_roots_pbar)
     while total_steps_total < stop_at_total_steps_total_thresh and len(candidate_roots) < stop_at_candidate_roots_num_thresh:
         #breakpoint()
         #find a candidate root
         interval_found = False
         while total_steps_for_this_root < stop_at_total_steps_per_root_thresh and total_steps_total < stop_at_total_steps_total_thresh:
-            if abs(current_x-start_val) >= displacement_mag_quit_thresh:
+            if abs(current_x-candidate_root_start_val_guess) >= displacement_mag_quit_thresh:
                 print("displacement mag exceeded displacement_mag_quit_thresh")
                 curr_pruf_val = tailored_prufer(current_x)
                 if curr_pruf_val < 0:
-                    return [[-np.inf, current_x - start_val, {"no_root_found"}]]
+                    yield [-np.inf, current_x - candidate_root_start_val_guess, {"no_root_found"}]
+                    return
                 elif curr_pruf_val > 0:
-                    return [[np.inf, current_x - start_val, {"no_root_found"}]]
+                    yield [np.inf, current_x - candidate_root_start_val_guess, {"no_root_found"}]
+                    return
 
             if not interval_found:
                 #breakpoint()
@@ -1361,11 +1359,17 @@ def find_candidate_roots(tailored_prufer, displacement_mag_quit_thresh=30, stop_
 
 
             if (abs(curr_pruf_val) < mis_val_tol and (current_interval[1]!=np.inf and current_interval[0]!=np.inf)) or abs(current_interval[1] - current_interval[0]) < interval_tol:
-                candidate_roots.append( [(current_interval[0]+current_interval[1])/2, (current_interval[1] - current_interval[0]), {"untagged"}] ) #average, error_radius
+                candidate_root =  [(current_interval[0]+current_interval[1])/2, (current_interval[1] - current_interval[0]), {"untagged"}] #average, error_radius
+                candidate_roots.append(candidate_root)
+                if not disable_candidate_roots_pbar:
+                    print(candidate_root[0])
                 break
 
             elif curr_pruf_val==0:
-                candidate_roots.append( [current_x, 0, {"untagged"}] )
+                candidate_root = [current_x, 0, {'untagged'}]
+                candidate_roots.append(candidate_root)
+                if not disable_candidate_roots_pbar:
+                    print(candidate_root[0])
                 break
 
             total_steps_for_this_root += 1
@@ -1376,26 +1380,40 @@ def find_candidate_roots(tailored_prufer, displacement_mag_quit_thresh=30, stop_
             if total_steps_total >= stop_at_total_steps_total_thresh:
                 if curr_pruf_val < 0:
                     print("total_steps_total exceeded stop_at_total_steps_total_thresh!")
-                    return [[-np.inf, current_x - start_val, {"no_root_found"}]]
+                    yield [-np.inf, current_x - candidate_root_start_val_guess, {"no_root_found"}]
+                    return
                 elif curr_pruf_val > 0:
-                    return [[np.inf, current_x - start_val, {"no_root_found"}]]
+                    yield [np.inf, current_x - candidate_root_start_val_guess, {"no_root_found"}]
+                    return
             else: # we know it's because the this root thresh is exceeded.
                 print("total_steps_for_this_root exceeded stop_at_total_steps_per_root_thresh!")
                 if curr_pruf_val < 0:
-                    return [[-np.inf, current_x - start_val, {"no_root_found"}]]
+                    yield [-np.inf, current_x - candidate_root_start_val_guess, {"no_root_found"}]
+                    return
                 elif curr_pruf_val > 0:
-                    return [[np.inf, current_x - start_val, {"no_root_found"}]]
+                    yield [np.inf, current_x - candidate_root_start_val_guess, {"no_root_found"}]
+                    return
 
 
         if len(candidate_roots) >= 2 and ((candidate_roots[-2][0] + subsequent_root_agreement_tol < candidate_roots[-1][0] < candidate_roots[-2][0] - subsequent_root_agreement_tol) or ((candidate_roots[-2][0] - candidate_roots[-2][1]) < (candidate_roots[-1][0] + candidate_roots[-1][1])) or ((candidate_roots[-1][0] - candidate_roots[-1][1]) < (candidate_roots[-2][0] + candidate_roots[-2][1]))):
             candidate_roots.pop()
             candidate_roots[-1][2].discard("untagged")
             candidate_roots[-1][2].add("subsequent_candidate_root_agreement")
-            break
+            yield candidate_roots[-1]
+            return
+            '''
+            current_interval = [-np.inf, np.inf]
+            displace_mag *=  step_mag_increase_factor
+            current_x = candidate_roots[-1][0] + candidate_roots[-1][1] + original_step_mag*displace_mag
+            current_step_mag = start_step_mag
+            prev_direction = start_direction
+            #intentionally not doing total_steps_for_this_root=0 here.
+            '''
         elif len(candidate_roots) != 0:
             current_interval = [-np.inf, np.inf]
             current_x = candidate_roots[-1][0] + candidate_roots[-1][1] + original_step_mag*fake_root_restart_movement_factor_as_ratio_of_start_step
             current_step_mag = start_step_mag
+            displace_mag = starting_displace_mag
             prev_direction = start_direction
             total_steps_for_this_root = 0
         else:
@@ -1403,41 +1421,63 @@ def find_candidate_roots(tailored_prufer, displacement_mag_quit_thresh=30, stop_
             break
     else:
         if len(candidate_roots) >= stop_at_candidate_roots_num_thresh:
-            return candidate_roots
+            for root in candidate_roots:
+                if not ("subsequent_candidate_root_agreement" in root[2]):
+                    yield root
+            return
+                
         elif total_steps_total >=  stop_at_total_steps_total_thresh:
             if len(candidate_roots) == 0:
                 print("Exceeded total_steps_total, but no candidate roots!")
                 warn("Exceeded total_steps_total, but no candidate roots!")
                 if curr_pruf_val < 0:
-                    return [[-np.inf, current_x - start_val, {"no_root_found"}]]
+                    yield [-np.inf, current_x - candidate_root_start_val_guess, {"no_root_found"}]
                 elif curr_pruf_val > 0:
-                    return [[np.inf, current_x - start_val, {"no_root_found"}]]
+                    yield [np.inf, current_x - candidate_root_start_val_guess, {"no_root_found"}]
                 else:
                     warn("this shouldn't be possible")
                     raise ArithmeticError #impossible condition, pru val is 0 but no candidate roots after exceeding total steps
             else:
-                return candidate_roots
-
+                for root in candidate_roots:
+                    if not ("subsequent_candidate_root_agreement" in root[2]):
+                        yield root
+                return
+    '''
     if "subsequent_candidate_root_agreement" in candidate_roots[-1][2]:
-        return candidate_roots
+        for root in candidate_roots:
+            if not ("subsequent_candidate_root_agreement" in root[2]):
+                yield root
     else:
         warn("this shouldn't be possible")
         raise ArithmeticError #impossible condition, shouldn't have gotten here without returning already
-
-def find_stable_roots_in_mis_and_cpm_prufer(mis_and_cpm_prufer, target_index, sanity_check_tol=50, sanity_check_step_for_zero_radius_pruf=.005, stop_at_candidate_roots_num_thresh=3, stop_at_total_steps_total_thresh=50, stop_at_total_steps_per_root_thresh=30, subsequent_root_agreement_tol=.001, interval_tol=.0001, pruf_mis_val_tol=.0005, start_val=0, start_direction="right", start_step_mag=.001, step_mag_increase_factor=2, sustained_monotone_radius_factor_as_ratio_of_prev_step=.1, uni_directional_sustained_monotone_step_sample_count=3, sustained_monotone_success_sample_thresh=.75, fake_root_restart_movement_factor_as_ratio_of_start_step=1):
+    '''
+    
+def find_stable_roots_in_mis_and_cpm_prufer(mis_and_cpm_prufer, target_index, displacement_mag_quit_thresh=30, sanity_check_tol=50, sanity_check_step_for_zero_radius_pruf=.0001, stop_at_candidate_roots_num_thresh=3, stop_at_total_steps_total_thresh=50, stop_at_total_steps_per_root_thresh=30, subsequent_root_agreement_tol=.001, interval_tol=.0001, pruf_mis_val_tol=.0005, candidate_root_start_val_guess=-.6, start_direction="right", start_step_mag=.001, step_mag_increase_factor=2, sustained_monotone_radius_factor_as_ratio_of_prev_step=.1, uni_directional_sustained_monotone_step_sample_count=3, sustained_monotone_success_sample_thresh=.75, fake_root_restart_movement_factor_as_ratio_of_start_step=1, disable_candidate_roots_pbar=True, print_testing_root=False, print_verified_roots=True, print_fake_roots=True, print_invalid_roots=False):
     #breakpoint()
     mis = lambda lambda_: mis_and_cpm_prufer(lambda_)[0]
     tailored_prufer = lambda lambda_: mis_and_cpm_prufer(lambda_)[1] - target_index
-    candidate_roots = find_candidate_roots(tailored_prufer, stop_at_candidate_roots_num_thresh=stop_at_candidate_roots_num_thresh, stop_at_total_steps_total_thresh=stop_at_total_steps_total_thresh, stop_at_total_steps_per_root_thresh=stop_at_total_steps_per_root_thresh, subsequent_root_agreement_tol=subsequent_root_agreement_tol, interval_tol=interval_tol, mis_val_tol=pruf_mis_val_tol, start_val=start_val, start_direction=start_direction, start_step_mag=start_step_mag, step_mag_increase_factor=step_mag_increase_factor, sustained_monotone_radius_factor_as_ratio_of_prev_step=sustained_monotone_radius_factor_as_ratio_of_prev_step, uni_directional_sustained_monotone_step_sample_count=uni_directional_sustained_monotone_step_sample_count, sustained_monotone_success_sample_thresh=sustained_monotone_success_sample_thresh, fake_root_restart_movement_factor_as_ratio_of_start_step=fake_root_restart_movement_factor_as_ratio_of_start_step)
-    verified_roots = []
+    candidate_roots = find_candidate_roots(tailored_prufer, stop_at_candidate_roots_num_thresh=stop_at_candidate_roots_num_thresh, stop_at_total_steps_total_thresh=stop_at_total_steps_total_thresh, stop_at_total_steps_per_root_thresh=stop_at_total_steps_per_root_thresh, subsequent_root_agreement_tol=subsequent_root_agreement_tol, interval_tol=interval_tol, mis_val_tol=pruf_mis_val_tol, candidate_root_start_val_guess=candidate_root_start_val_guess, start_direction=start_direction, start_step_mag=start_step_mag, step_mag_increase_factor=step_mag_increase_factor, sustained_monotone_radius_factor_as_ratio_of_prev_step=sustained_monotone_radius_factor_as_ratio_of_prev_step, uni_directional_sustained_monotone_step_sample_count=uni_directional_sustained_monotone_step_sample_count, sustained_monotone_success_sample_thresh=sustained_monotone_success_sample_thresh, fake_root_restart_movement_factor_as_ratio_of_start_step=fake_root_restart_movement_factor_as_ratio_of_start_step, displacement_mag_quit_thresh=displacement_mag_quit_thresh, disable_candidate_roots_pbar=disable_candidate_roots_pbar)
     #breakpoint()
+    no_verified_roots=True
+    
     for candidate_root in tqdm(candidate_roots, desc="Testing Candidate Roots..."):
-        print(f"Testing {candidate_root}")
+        if print_testing_root:
+            print(f"Testing: {candidate_root}")
         #breakpoint()
+        if 'subsequent_candidate_root_agreement' in candidate_root[2]:
+            yield candidate_root
+            return
+        
         if abs(candidate_root[0]) != np.inf and ("no_root_found" not in candidate_root[2]):
             if abs(mis(candidate_root[0])) < sanity_check_tol:
-                print('Verified!')
-                verified_roots.append(candidate_root)
+                if print_verified_roots:
+                    if print_testing_root:
+                        print('Verified!')
+                    else:
+                        print(f"Verified: {candidate_root}!")
+                no_verified_roots = False
+                yield candidate_root
+                return
                 continue
 
             if abs(candidate_root[1]) == 0:
@@ -1449,18 +1489,28 @@ def find_stable_roots_in_mis_and_cpm_prufer(mis_and_cpm_prufer, target_index, sa
             sanity_check_signs = np.sign([left_sanity_result, right_sanity_result])
             same_sign_bool = sanity_check_signs[0]*sanity_check_signs[1]
             if same_sign_bool == -1:
-                print('Verified!')
-                verified_roots.append(candidate_root)
+                if print_verified_roots:
+                    if print_testing_root:
+                        print('Verified!')
+                    else:
+                        print(f'Verified: {candidate_root}!')
+                no_verified_roots = False
+                yield candidate_root
+                return
             else:
-                print('Fake Root!')
+                if print_fake_roots:
+                    if print_testing_root:
+                        print('Fake Root!')
+                    else:
+                        print(f"Fake Root: {candidate_root}!")
         else:
-            print('Fake Root!')
+            if print_invalid_roots:
+                print('Invalid Root: {candidate_root}!')
             continue
 
-    if len(verified_roots) == 0:
-        return [[None, np.inf, {'no_root_found'}]]
-    else:
-        return verified_roots
+    if no_verified_roots:
+        yield [None, np.inf, {'no_root_found'}]
+        return
 
 
 
@@ -1530,11 +1580,6 @@ def plot_mismatch(possible_eigens, mismatch):
     vb.setYRange(*y_range)
     vb.addItem(origin_x_axis)
 
-def Make_Displacement_Newton(func, dlambda=.1):
-    #for a prufer mismatch:
-    #add the sought index/f' to get the displacement_newton_function [which tells you where newton's method will move to get the next iteration] for the tailored prufer mismatch for that index [since -(f-i)/(f-i)' = -(f-i)/f' = -f/f' + i/f'. what this means is that if the displacement_newton_function equals i/f' at a point, then that point is a fixed point of newton's method on the tailored prufer mismatch for the ith eigenval.
-    return lambda x: -func(x)/NumD(func, dlambda, cmp_step=False)(x)
-
 def plot_many_funcs(list_of_list_of_x_vals, funcs, hue_converge=True, val_converge=True):
     pw = pg.plot()
     pi = pw.getPlotItem()
@@ -1588,124 +1633,6 @@ def plot_eigen_funcs(list_of_list_of_coords, eigen_vals, color_eigen_as_zero_pre
 
 
 
-
-
-#prufer tests
-
-'''
-#azimuth (magnetic quantum number)
-p,q,w = lambda x:1, lambda x: 0, lambda x: 1 #azimuthal equation
-x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = boundary_conditions_to_shooters([0, 2*math.pi])[1]
-#d^2y/dx^2 = -\lambda y with periodic boundary conditions y(0)=y(2*\pi)=0. y'(0)=y'(2*\pi)=1 This is the equation for the azimuthal angle. The eigen_vals are the eigenvalues of -d^2/dx^2, and therefore the magnetic quantum number m=sqrt(\lambda)
-'''
-
-
-'''#polar (azimuthal quantum number)
-m=3
-boundary_epsilon = .01
-p,q,w = lambda x: math.sin(x), lambda x: m**2/math.sin(x), lambda x: math.sin(x)
-init_wronsk = [0,1]
-x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = 0+boundary_epsilon, *init_wronsk, math.pi-boundary_epsilon, *init_wronsk
-'''
-
-
-'''
-#radial
-electron_mass, proton_mass = constants.electron_mass, constants.proton_mass
-reduced_mass = electron_mass*proton_mass/(electron_mass+proton_mass)
-
-electron_charge = constants.elementary_charge
-vaccuum_permittivity = constants.epsilon_0
-
-hbar = constants.hbar
-
-
-l = 1
-boundary_epsilon = .01
-boundary_inf_approx = 100
-#p,q,w = lambda x: x**2, lambda x: l*(l+1) - ((2*reduced_mass)*(x**2)/(hbar**2)) * ((electron_charge**2)/(4*math.pi*vaccuum_permittivity*x)), lambda x: ((2*reduced_mass)*(x**2)/(hbar**2))
-coulomb_z = 1/2
-p,q,w = lambda x: 1, lambda x: l*(l+1)/(x**2) - (2*coulomb_z)/(x), lambda x: 1
-deriv_at_zero, deriv_at_inf = 1,1
-free_boundary_params = [deriv_at_zero, deriv_at_inf]
-x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = 0+boundary_epsilon, 0, free_boundary_params[0], boundary_inf_approx, 0, free_boundary_params[1]
-'''
-
-
-
-
-
-'''
-prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-generic_plot(np.arange(-.1,0,.01), prufer_mismatch)
-'''
-
-'''
-prufer_mismatches_param_by_dx = lambda dx: (lambda x: Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)(x) - 1)
-displacement_newton_param_by_dx = lambda dx: Make_Displacement_Newton(prufer_mismatches_param_by_dx(dx))
-index_addition_scaling_funcs_param_by_dx = lambda dx: lambda lambda_: 1/NumD(prufer_mismatches_param_by_dx(dx), dx, cmp_step=False)(lambda_) #on the plot, i_p*these + (the newton function for i=0) = (the newton function for i=i_p)
-
-dx_list = np.arange(.02, .001, -.001)
-displacement_funcs = np.vectorize(displacement_newton_param_by_dx)(dx_list)
-index_addition_scaling_funcs = np.vectorize(index_addition_scaling_funcs_param_by_dx)(dx_list)
-interleaved_list = np.reshape(np.column_stack((displacement_funcs, index_addition_scaling_funcs)), -1) #shape dimension of -1 lets numpy figure out the length of the flattened interleaving from knowing it should by flat
-
-list_of_x_vals = np.tile(np.arange(.1,100,.1), [len(dx_list)*2,1])
-plot_many_funcs(list_of_x_vals, interleaved_list)
-'''
-
-'''
-displacement_newton_param_by_i = lambda i: Make_Displacement_Newton(lambda x: Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)(x) - i)
-i_list = np.array(range(0,10))
-list_of_x_vals = np.tile(np.arange(.1,16,.1), [len(i_list),1])
-plot_many_funcs(list_of_x_vals, np.vectorize(displacement_newton_param_by_i)(i_list))
-'''
-
-
-'''
-dx = .001
-tolerance = .01
-up_to_n_eigens = 3
-
-prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-#generic_plot(np.arange(-10,20,.1), prufer_mismatch)
-eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance)))[:,0].round(5)
-eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, dx*2)))
-plot_eigen_funcs(eigen_funcs, eigen_vals)
-#magnetic_quantum_numbers = np.sqrt(eigen_vals)
-'''
-
-'''
-while True:
-    free_boundary_params = [float(i) for i in input('derivs: ').split(',')]
-    boundary_epsilon, boundary_inf_approx = [float(i) for i in input('boundaries: ').split(',')]
-    func_vals = [float(i) for i in input('func_vals: ').split(',')]
-    x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b = 0+boundary_epsilon, func_vals[0], free_boundary_params[0], boundary_inf_approx, func_vals[1], free_boundary_params[1]
-
-    prufer_mismatch = Make_Prufer_Mismatch_given_original_boundary_conditions(p, q, w, x_a, y_a, dy__dx_a, x_b, y_b, dy__dx_b, dx)
-    eigen_vals = np.array(list(find_first_n_eigen_val_given_Prufer_Mismatch(prufer_mismatch, up_to_n_eigens, tolerance, custom_eigen_list=range(1,up_to_n_eigens))))[:,0].round(5)
-    eigen_funcs = np.array(list(find_eigen_funcs_given_eigen_vals(eigen_vals, p, q, w, x_a, y_a, dy__dx_a, x_b, boundary_inf_approx/100)))
-    plot_eigen_funcs(eigen_funcs, eigen_vals)
-    print("look!")
-    print(eigen_vals)
-    print(free_boundary_params)
-    print(boundary_epsilon, boundary_inf_approx)
-    print(func_vals)
-    while True:
-        try:
-            app.processEvents()
-        except KeyboardInterrupt:
-            break
-'''
-
-
-
-
-#cpm tests
-
-# Something happens here
-
-
 #azimuthal equation (magnetic quantum numbers)
 
 def azi(which_init=1):
@@ -1714,7 +1641,7 @@ def azi(which_init=1):
     newton_tol = .001
     r_mesh = np.arange(0, 2*math.pi, mesh_dr)
     init_left_shot_vector, init_right_shot_vector = [[0,1], [1,0]][which_init], [[0,1], [1,0]][which_init]
-    pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
+    pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096, prefer='threads')
     baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r, q_of_r, w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, dx=.01, parallel_pool=pool)
     generic_plot(np.arange(-.1, 10, .2), lambda e: mis_eigen(e)[1])
     #guess = 2#float(input("guess: "))
@@ -1748,16 +1675,17 @@ def polar(which_init=1):
         #print(Secant_Method(mis_eigen, guess, guess+.01, newton_tol, f_index_to_rootfind=0))
     #generic_plot(np.arange(0, 30.1, .1), lambda l: mis_eigen_0(l)[1])
     generic_plot(np.arange(9.16087, 9.1742, .0000005), lambda l: mis_eigen_0(l)[1])
-    
+
 #radial
-def radial(which_init=0, boundary_epsilon=.01, mid_r_start=1, mid_r_end=49, boundary_inf_approx=50, mesh_dr_start=.01, mesh_dr_mid=.01, mesh_dr_end=.01, Num_D_sigma_dx=.0001, liouville_n=2):
+#candidate_root_start_val_guess=-1, -.6; force_monotone_start_val=-.1261
+def radial(which_init=0, boundary_epsilon=.01, boundary_inf_approx=50, mesh_dr=.01, Num_D_sigma_dx=.0001, liouville_n=2, candidate_root_start_val_guess=-.6, force_monotone_start_val=-.1261):
     #electron_mass, proton_mass = constants.electron_mass, constants.proton_mass
     #reduced_mass = electron_mass*proton_mass/(electron_mass+proton_mass)
     #electron_charge = constants.elementary_charge
     #vaccuum_permittivity = constants.epsilon_0
     #hbar = constants.hbar
 
-    l = 1
+    l = 0
  
     #p_of_r,q_of_r,w_of_r = lambda x: x**2, lambda x: l*(l+1) - ( ((2*reduced_mass*(x**2))/(hbar**2)) * ((electron_charge**2)/(4*math.pi*vaccuum_permittivity*x))  ), lambda x: ((2*reduced_mass*(x**2))/(hbar**2))
     #p_of_r,q_of_r,w_of_r = lambda x: 1, lambda x: l*(l+1)/(x**2) - (1/x), lambda x: 1
@@ -1768,46 +1696,53 @@ def radial(which_init=0, boundary_epsilon=.01, mid_r_start=1, mid_r_end=49, boun
     #mesh_dr_mid = .001
     #mesh_dr_end = .1
 
-    r_mesh_start = np.arange(boundary_epsilon, mid_r_start, mesh_dr_start)
-    r_mesh_mid = np.arange(mid_r_start, mid_r_end, mesh_dr_mid)
-    r_mesh_end = np.arange(mid_r_end, boundary_inf_approx, mesh_dr_end)
-    r_mesh = np.concatenate([r_mesh_start, r_mesh_mid, r_mesh_end])
+    r_mesh = np.arange(boundary_epsilon, boundary_inf_approx, mesh_dr)
     init_left_shot_vector, init_right_shot_vector = [[0,1], [1,0]][which_init], [[0,1], [1,0]][which_init]
 
 
     #!!!very high mismatch value...for the correct eigenvalue.
-    pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096)
+    pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096, prefer='threads')
     #breakpoint()
-    disable_shooting_pbar = False
-    disable_coord_pbar = False
-    disable_pot_pbar = False
+    disable_shooting_pbar = True
+    disable_coord_pbar = True
+    disable_pot_pbar = True
+    disable_candidate_roots_pbar = False
     store_solution = False
     force_monotone = True
-    baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r,q_of_r,w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, liouville_n=liouville_n, dx=Num_D_sigma_dx, disable_shooting_pbar=disable_shooting_pbar, disable_coord_pbar=disable_coord_pbar, disable_pot_pbar=disable_pot_pbar, store_solution=store_solution, parallel_pool=pool, force_monotone=force_monotone, force_monotone_start_val=-.1261, stepping_from_anchor_dx=.001, adhoc_two=False)
+    rad_displacement_mag_quit_thresh = .55
+    
+    baked_mesh, mis_eigen = CPM_Method_Liouville_Mismatch(p_of_r,q_of_r,w_of_r, r_mesh, init_left_shot_vector, init_right_shot_vector, liouville_n=liouville_n, dx=Num_D_sigma_dx, disable_shooting_pbar=disable_shooting_pbar, disable_coord_pbar=disable_coord_pbar, disable_pot_pbar=disable_pot_pbar, store_solution=store_solution, parallel_pool=pool, force_monotone=force_monotone, force_monotone_start_val=force_monotone_start_val, stepping_from_anchor_dx=.001, adhoc_two=False)
+    breakpoint()
+    e0 = next(find_stable_roots_in_mis_and_cpm_prufer(mis_eigen, 0, stop_at_candidate_roots_num_thresh=3, disable_candidate_roots_pbar=disable_candidate_roots_pbar, candidate_root_start_val_guess=candidate_root_start_val_guess, displacement_mag_quit_thresh=rad_displacement_mag_quit_thresh))[0]
+    
+    with open('Parameter_Testing/testing_force_monotone_start_val.txt', 'a') as f:
+        f.write(f"\n{force_monotone_start_val}, {candidate_root_start_val_guess}; {e0}, {(e0 - -.5) if e0 is not None else None}, {math.log((e0- -.5), 1/10) if e0 is not None else None}")
+    #return e0
     #breakpoint()
     #print("plotting")
     #generic_plot(np.arange(-.1251, -.124, .00025), lambda e: mis_eigen(e)[1])
-    generic_plot(np.arange(-.1251, -.05, .01), lambda e: mis_eigen(e)[1])
+    #generic_plot(np.arange(-.1251, -.05, .01), lambda e: mis_eigen(e)[1])
     #generic_plot(np.arange(-.126, -.01, .001), lambda e: mis_eigen(e)[1]) 
+    #generic_plot(np.arange(-.5, -.45, .001), lambda e: mis_eigen(e)[1])
     #breakpoint()
     #eig_out = mis_eigen(-.0625)
     #plot_data = eig_out[2]
     #plot_data = np.array(plot_data)
     #mis_eigen(-.0625)[1]
+
 #radial()
 
-    #stable_roots = lambda index: find_stable_roots_in_mis_and_cpm_prufer(mis_eigen, index)
-    #print([stable_roots(i) for i in range(1,2)])
-
-#boundary_epsilon=.0001,
-#boundary_inf_approx=1000,
-#mesh_dr_start=.00001, mesh_dr_mid=.001, mesh_dr_end=.01, Num_D_sigma_dx=.0001
+if __name__ == '__main__':
+    range1, range2 =  list(np.arange(-.5, .2478, .001)), list(np.arange(-.5, -.7, -.1))
+    length = len(range1) * len(range2)
+    for (force_monotone_start_val, candidate_root_start_val_guess) in tqdm( interleave(list(itertools.product(range1, range2))), total=length, desc="Parameter Testing..."):
+        print(radial(force_monotone_start_val=force_monotone_start_val, candidate_root_start_val_guess=candidate_root_start_val_guess))
 
 '''
 import time
 filename = 'parameter_testing.txt'
 def parameter_test():
-    args_pre_prod = [np.arange(-2.0,-6.0,-1.0), np.arange(2,4.0,1.0), np.arange(-2.0,-6.0,-1.0), np.arange(-1.0,-4.0,-1.0), np.arange(0.0,-4.0,-1.0), np.arange(-2.0, -5.0, -1.0)]
+    args_pre_prod = [np.arange(-2.0,-6.0,-1.0), np.arange(2,4.0,1.0), np.arange(-2.0,-6.0,-1.0), np.arange(-2.0,-6.0,-1.0)]
     args_prod = itertools.product(*args_pre_prod)
     with open('parameter_testing.txt', 'r') as f:
         text = f.read()
@@ -1821,13 +1756,13 @@ def parameter_test():
 
     args_prod = list(args_prod)[left_off:]
     i = left_off
-    for (p1,p2,p3,p4,p5,p6) in tqdm(args_prod, total=len(args_prod), desc="Parameter Testing..."):
-        these_args = [10.0**p1, 10.0**p2, 10.0**p3, 10.0**p4, 10.0**p5, 10.0**p6]
+    for (p1,p2,p3,p4) in tqdm(args_prod, total=len(args_prod), desc="Parameter Testing..."):
+        these_args = [10.0**p1, 10.0**p2, 10.0**p3, 10.0**p4]
         with open('parameter_testing.txt', 'a') as f:
             f.write(str(these_args)+'; ')
             try:
                 start_time = time.time()
-                err=1-radial(boundary_epsilon=these_args[0], boundary_inf_approx=these_args[1], mesh_dr_start=these_args[2], mesh_dr_mid=these_args[3], mesh_dr_end=these_args[4], Num_D_sigma_dx=these_args[5])
+                err=1-radial(boundary_epsilon=these_args[0], boundary_inf_approx=these_args[1], mesh_dr=these_args[2], Num_D_sigma_dx=these_args[3])
                 end_time = time.time()
                 dt = end_time - start_time
                 f.write(str(err))
