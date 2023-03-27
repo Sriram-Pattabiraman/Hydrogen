@@ -140,8 +140,8 @@ def metropolis_hastings(un_normed_probability_density, starting_window=np.array(
 
 
 #monte_carlo_integration
-def monte_carlo_integration(integrand, integration_window=np.array([[-1,1], [-1,1], [-1,1]]), importance_sampling_distro=None, find_expected_value=False, sample_size=1000, metropolis_starting_diagonal_covariance=1, integrand_coord_system='cartesian', window_coord_system='cartesian', disable_metropolis_pbar=True, parallel_pool=None):
-    #if find_expected_value==True, then importance_sampling_distro needs to be normalized
+def monte_carlo_integration(integrand, integration_window, importance_sampling_distro=None, find_expected_value=False, sample_size=1000, metropolis_starting_diagonal_covariance=1, integrand_coord_system='cartesian', window_coord_system='cartesian', disable_metropolis_pbar=True, parallel_pool=None):
+    #if find_expected_value==False, then importance_sampling_distro needs to be normalized
     if parallel_pool is None:
         parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096, prefer='threads')
       
@@ -225,32 +225,6 @@ def monte_carlo_integration(integrand, integration_window=np.array([[-1,1], [-1,
     
     return sum(parallel_pool(work_generator))/num_of_short_runs
 
-def monte_carlo_integrate_3D(func, window=[[0,1], [0, 2*math.pi], [0, math.pi]], func_coord_system='spherical', window_coord_system='spherical', monte_carlo_n=10000): #!!!generalize
-    if func_coord_system == 'spherical':
-        integrand = lambda r, phi, theta: func(r, phi, theta) * (r**2) * math.sin(theta) 
-    elif func_coord_system == 'cartesian':
-        integrand = lambda x, y, z: func(x,y,z)
-    else:
-        raise NotImplementedError
-        
-    if not (monte_carlo_n is False):
-        if window_coord_system == func_coord_system:
-            if window_coord_system == 'spherical':
-                volume = (window[0][1] - window[0][0]) * (window[1][1] - window[1][0]) * (window[2][1] - window[2][0])
-            elif window_coord_system == 'cartesian':
-                volume = (window[0][1] - window[0][0]) * (window[1][1] - window[1][0]) * (window[2][1] - window[2][0])
-        else:
-            raise NotImplementedError
-            
-        running_total = 0
-        for i in range(monte_carlo_n):
-            starting_window_lows, starting_window_highs = window[:,0], window[:,1]
-            random_coords = np.random.default_rng().uniform(low=starting_window_lows, high=starting_window_highs)
-            running_total += integrand(*random_coords)
-        
-        return volume * running_total/(monte_carlo_n)
-    
-    
     
 def tests(relative_error=.1):
     #breakpoint()
@@ -302,7 +276,13 @@ def tests(relative_error=.1):
     act6 = 1/3
     e6 = error(calc6, act6)
     
-    if not all(np.less_than(np.abs([e0,e1,e2,e3,e4,e5,e6]), np.repeat([relative_error],7))):
+    #vectors!
+    v_func = lambda r: np.array([r, r**2])
+    calc7 = monte_carlo_integration(v_func, np.array([[0,1]]))
+    act7 = np.array([1/2, 1/3])
+    e7 = np.linalg.norm(calc7 - act7)
+    
+    if not all(np.less_than(np.abs([e0,e1,e2,e3,e4,e5,e6,e7]), np.repeat([relative_error],8))):
         return False
     else:
         return True

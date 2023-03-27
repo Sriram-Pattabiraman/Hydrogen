@@ -505,9 +505,9 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
 
 parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096, prefer='threads')
 #o1=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,0], parallel_pool=parallel_pool) 
-#o2=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,1,0], parallel_pool=parallel_pool) 
+o2=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,1,0], parallel_pool=parallel_pool) 
 #o3=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,0,0], parallel_pool=parallel_pool) 
-o4=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,1,0], parallel_pool=parallel_pool) 
+#o4=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,1,0], parallel_pool=parallel_pool) 
 #breakpoint()
 #out_func = vector_eigen_for_choice_of_basis_init_wronsks()[1](0,0,-.0625)
 #out_val = out_func(1,1,1)

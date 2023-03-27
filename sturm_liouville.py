@@ -1732,11 +1732,14 @@ def radial(which_init=0, boundary_epsilon=.01, boundary_inf_approx=50, mesh_dr=.
 
 #radial()
 
+'''
 if __name__ == '__main__':
     range1, range2 =  list(np.arange(-.5, .2478, .001)), list(np.arange(-.5, -.7, -.1))
     length = len(range1) * len(range2)
     for (force_monotone_start_val, candidate_root_start_val_guess) in tqdm( interleave(list(itertools.product(range1, range2))), total=length, desc="Parameter Testing..."):
         print(radial(force_monotone_start_val=force_monotone_start_val, candidate_root_start_val_guess=candidate_root_start_val_guess))
+'''
+
 
 '''
 import time

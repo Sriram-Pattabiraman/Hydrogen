@@ -7,7 +7,10 @@ Created on Sat Mar 25 11:28:53 2023
 
 
 import numpy as np
+import scipy as sp
 import math
+
+import itertools
 
 
 #find in array
@@ -151,4 +154,106 @@ def restrict(func, restriction_window_lows=None, restriction_window_highs=None):
         else:
             return 0
     return restricted_func
+    
+
+class symarray(np.ndarray):
+    def __new__(cls, in_arr, permutable_axes_groups=np.empty((0,0))):
+        obj = np.asarray(in_arr).view(cls)
+        obj.permutable_axes_groups = permutable_axes_groups
+        return obj
+
+    def __array_finalize__(self, obj):
+        assert self.check_symmetry(getattr(obj, "permutable_axes", np.empty((0,0))))
+        if obj is None: #explicit constructor
+            return
+        else:
+            self.permutable_axes_groups = getattr(obj, "permutable_axes", np.empty((0,0)))
+                
+        
+    def __setitem__(self, indexes, value):
+        super(symarray, self).__setitem__(indexes, value)   
+        
+        permutable_axes_groups = self.permutable_axes_groups
+        equivalent_index_tuples = [np.copy(indexes)]
+        for permutable_axes_group in permutable_axes_groups:
+            up_to_this_group_applied_equivalent_indices = []
+            permuting_indices = []
+            for axis in permutable_axes_group:
+                if axis >= len(indexes):
+                    continue
+                else:
+                    permuting_indices.append(indexes[axis])
+            
+            for permutation in itertools.permutations(permuting_indices):
+                for these_indexes in equivalent_index_tuples:
+                    working_these_indexes = np.copy(these_indexes)
+                    this_permuting_axis_num = 0
+                    for axis in range(len(indexes)):
+                        if axis in permutable_axes_group:
+                            working_these_indexes[axis] = permutation[this_permuting_axis_num]
+                            this_permuting_axis_num += 1
+                            
+                    up_to_this_group_applied_equivalent_indices.append(working_these_indexes)
+                    
+            equivalent_index_tuples = np.copy(up_to_this_group_applied_equivalent_indices)
+            
+        for equivalent_index_tuple in equivalent_index_tuples:
+            if type(indexes) == tuple:
+                type_corrected_setting_indice = tuple(equivalent_index_tuple)
+            elif type(indexes) == list:
+                type_corrected_setting_indice = list(equivalent_index_tuple)    
+            elif issubclass(type(indexes), np.ndarray):
+                index_type = type(indexes)
+                type_corrected_setting_indice = np.array(equivalent_index_tuple).view(index_type)
+                
+            super(symarray, self).__setitem__(type_corrected_setting_indice, value)
+   
+    def check_symmetry(self, permutable_axes_groups):
+        arr_it = np.nditer(self, flags=['multi_index']) 
+        for part in arr_it:
+            indexes = arr_it.multi_index
+            equivalent_index_tuples = [np.copy(indexes)]
+            for permutable_axes_group in permutable_axes_groups:
+                up_to_this_group_applied_equivalent_indices = []
+                permuting_indices = []
+                for axis in permutable_axes_group:
+                    if axis >= len(indexes):
+                        continue
+                    else:
+                        permuting_indices.append(indexes[axis])
+                
+                for permutation in itertools.permutations(permuting_indices):
+                    for these_indexes in equivalent_index_tuples:
+                        working_these_indexes = np.copy(these_indexes)
+                        this_permuting_axis_num = 0
+                        for axis in range(len(indexes)):
+                            if axis in permutable_axes_group:
+                                working_these_indexes[axis] = permutation[this_permuting_axis_num]
+                                this_permuting_axis_num += 1
+                                
+                        up_to_this_group_applied_equivalent_indices.append(working_these_indexes)
+                        
+                equivalent_index_tuples = np.copy(up_to_this_group_applied_equivalent_indices)
+                
+            val = self[indexes]
+            for equivalent_index_tuple in equivalent_index_tuples:
+                if type(indexes) == tuple:
+                    type_corrected_setting_indice = tuple(equivalent_index_tuple)
+                elif type(indexes) == list:
+                    type_corrected_setting_indice = list(equivalent_index_tuple)    
+                elif issubclass(type(indexes), np.ndarray):
+                    index_type = type(indexes)
+                    type_corrected_setting_indice = np.array(equivalent_index_tuple).view(index_type)
+                    
+                if not self[type_corrected_setting_indice] == val:
+                    return False
+            else:
+                return True
+            
+        
+def test():
+    arr=symarray(np.array([ [ [[1,2,3], [2,4,5], [3,5,6]], [[11,12,13], [12,14,15], [13,15,16]] ], [ [[11,12,13], [12,14,15], [13,15,16]], [[1,2,3], [2,4,5], [3,5,6]] ] ]), permutable_axes_groups=[[0,1], [2,3]])
+
+    arr[0,1,0,1]=100
+    assert all(np.equal([arr[0,1, 0,1], arr[0,1, 1,0], arr[1,0, 0,1], arr[1,0, 1,0]], np.repeat(100, 4)))
     
