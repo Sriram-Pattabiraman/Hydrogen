@@ -57,14 +57,33 @@ def expectation_energy(hamiltonian, trial_wave_function, integration_window=np.a
     expectation_energy = mc.monte_carlo_integration(local_energy, importance_sampling_distro=abs(trial_wave_function)**2, integration_window=integration_window, find_expected_value=True, sample_size=sample_size, metropolis_starting_diagonal_covariance=metropolis_starting_diagonal_covariance, integrand_coord_system=integrand_coord_system, window_coord_system=window_coord_system, disable_metropolis_pbar=disable_metropolis_pbar, parallel_pool=parallel_pool)
     return expectation_energy
 
+def vary_opt(cost_func, parameterized_trial, parameter_range):
+    pass
+
 def minimize_expectation_energy(parameterized_trial_wave_function):
     pass
 
 
 def laplacian(func, coord_indices, dx=.00001):
-    def laplacian_of_this_func(*args, func=func, coord_indices=coord_indices, dx=dx):
-        pass
-
+    def laplacian_of_this_func(*coord, func=func, coord_indices=coord_indices, dx=dx):
+        coord = np.arary(coord)
+        space_dim = np.shape(coord)[0]
+        
+        middle_val = func(*coord)
+        
+        displacement_vector = np.zeros(space_dim)
+        acc = 0
+        for indice in coord_indices:
+            displacement_vector[indice] = dx
+            forward_val, backward_val = func(*(coord + displacement_vector)), func(*(coord - displacement_vector))
+            acc += (forward_val + backward_val - 2*middle_val)/dx**2
+            displacement_vector[indice] = 0
+        return acc
+    return
+    
 def Make_Hamiltonian(specification):
     pass
 
+
+def He_Test():
+    pass

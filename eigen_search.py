@@ -503,31 +503,32 @@ def vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,
 
 
 
-parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096, prefer='threads')
-#o1=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,0], parallel_pool=parallel_pool) 
-o2=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,1,0], parallel_pool=parallel_pool) 
-#o3=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,0,0], parallel_pool=parallel_pool) 
-#o4=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,1,0], parallel_pool=parallel_pool) 
-#breakpoint()
-#out_func = vector_eigen_for_choice_of_basis_init_wronsks()[1](0,0,-.0625)
-#out_val = out_func(1,1,1)
-
-
-#out_list = scalar_3D_plot([np.arange(-2,2,.1),np.arange(-2,2,.1),np.arange(-2,2,.1)], out_func)
-#out_list = scalar_3D_plot([np.arange(0,2*math.pi,1),np.arange(0,math.pi,1),np.arange(0,1,.1)], out_func, coord_system_of_ranges='spherical')
-
-print("done!")
-#w.show()
-#app.exec()
-
-'''
-#breakpoint()
-import matplotlib.pyplot as plt
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-X,Y,Z = np.mgrid[:11,:11,:11]
-ax.scatter(X, Y, Z, c=mag_data.ravel(), cmap=plt.get_cmap("Greys"), depthshade=True)
-fig.add_axes(ax)
-'''
-
+if __name__ == '__main__':
+    parallel_pool = joblib.Parallel(n_jobs=8, verbose=VERBOSITY, batch_size=4096, prefer='threads')
+    #o1=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,0,0], parallel_pool=parallel_pool) 
+    o2=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[0,1,0], parallel_pool=parallel_pool) 
+    #o3=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,0,0], parallel_pool=parallel_pool) 
+    #o4=vector_eigen_for_choice_of_basis_init_wronsks(which_basis_init_wronsks=[1,1,0], parallel_pool=parallel_pool) 
+    #breakpoint()
+    #out_func = vector_eigen_for_choice_of_basis_init_wronsks()[1](0,0,-.0625)
+    #out_val = out_func(1,1,1)
+    
+    
+    #out_list = scalar_3D_plot([np.arange(-2,2,.1),np.arange(-2,2,.1),np.arange(-2,2,.1)], out_func)
+    #out_list = scalar_3D_plot([np.arange(0,2*math.pi,1),np.arange(0,math.pi,1),np.arange(0,1,.1)], out_func, coord_system_of_ranges='spherical')
+    
+    print("done!")
+    #w.show()
+    #app.exec()
+    
+    '''
+    #breakpoint()
+    import matplotlib.pyplot as plt
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    X,Y,Z = np.mgrid[:11,:11,:11]
+    ax.scatter(X, Y, Z, c=mag_data.ravel(), cmap=plt.get_cmap("Greys"), depthshade=True)
+    fig.add_axes(ax)
+    '''
+    
 
